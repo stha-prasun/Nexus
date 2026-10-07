@@ -1,0 +1,29 @@
+# Lefthook configuration — runs typecheck on every commit & push,
+# validates commit messages (Conventional Commits), and lints staged files with Biome.
+# Docs: https://lefthook.dev
+
+pre-commit:
+  jobs:
+    - name: typecheck frontend
+      root: Frontend/
+      run: npm run typecheck
+    - name: typecheck backend
+      root: Backend/
+      run: npm run typecheck
+    - name: biome staged files
+      run: npx @biomejs/biome check --write --files-ignore-unknown=true --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: npx --no -- commitlint --edit {1}
+
+pre-push:
+  jobs:
+    - name: typecheck frontend
+      root: Frontend/
+      run: npm run typecheck
+    - name: typecheck backend
+      root: Backend/
+      run: npm run typecheck
