@@ -1,12 +1,8 @@
 import { Module } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { Client } from 'minio';
-import { Pool } from 'pg';
-import {
-  MINIO_CLIENT,
-  POSTGRES_POOL,
-  REDIS_CLIENT,
-} from './constants/health.contants';
+import { DatabaseModule } from '../database/database.module';
+import { MINIO_CLIENT, REDIS_CLIENT } from './constants/health.contants';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { HealthRepository } from './repositories/health.repository';
@@ -17,23 +13,11 @@ const env = (key: string, fallback: string): string =>
   process.env[key] ?? fallback;
 
 @Module({
+  imports: [DatabaseModule],
   controllers: [HealthController],
   providers: [
     HealthService,
     HealthRepository,
-    {
-      provide: POSTGRES_POOL,
-      useFactory: () =>
-        new Pool({
-          host: env('POSTGRES_HOST', 'localhost'),
-          port: Number(env('POSTGRES_PORT', '6432')),
-          user: env('POSTGRES_USER', 'nexus'),
-          password: env('POSTGRES_PASSWORD', 'nexus_dev_password'),
-          database: env('POSTGRES_DB', 'nexus'),
-          max: Number(env('POSTGRES_POOL_MAX', '10')),
-          connectionTimeoutMillis: 2000,
-        }),
-    },
     {
       provide: REDIS_CLIENT,
       useFactory: () => {
@@ -62,6 +46,6 @@ const env = (key: string, fallback: string): string =>
         }),
     },
   ],
-  exports: [POSTGRES_POOL, REDIS_CLIENT, MINIO_CLIENT],
+  exports: [REDIS_CLIENT, MINIO_CLIENT],
 })
 export class HealthModule {}

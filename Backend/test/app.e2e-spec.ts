@@ -3,9 +3,9 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { POSTGRES_POOL } from './../src/module/database/constants/database.contants';
 import {
   MINIO_CLIENT,
-  POSTGRES_POOL,
   REDIS_CLIENT,
 } from './../src/module/health/constants/health.contants';
 

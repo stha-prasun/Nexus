@@ -2,11 +2,8 @@ import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import type { Client } from 'minio';
 import type { Pool } from 'pg';
-import {
-  MINIO_CLIENT,
-  POSTGRES_POOL,
-  REDIS_CLIENT,
-} from '../constants/health.contants';
+import { POSTGRES_POOL } from '../../database/constants/database.contants';
+import { MINIO_CLIENT, REDIS_CLIENT } from '../constants/health.contants';
 import type {
   CheckResult,
   DependencyName,
@@ -30,7 +27,8 @@ export class HealthRepository implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await Promise.allSettled([this.pool.end(), this.redis.quit()]);
+    // The postgres pool is owned by DatabaseModule, which closes it.
+    await this.redis.quit();
   }
 
   private async timed(operation: () => Promise<unknown>): Promise<CheckResult> {
