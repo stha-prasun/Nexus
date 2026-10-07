@@ -1,0 +1,123 @@
+name: nexus-backend
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-nexus}
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-nexus} -d ${POSTGRES_DB:-nexus}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Connection pooler: the app connects here (host port 6432) instead of
+  # postgres directly, so server connections are shared across clients.
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: nexus-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${POSTGRES_USER:-nexus}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-nexus_dev_password}
+      DB_NAME: ${POSTGRES_DB:-nexus}
+      # PG17 stores passwords as SCRAM, so pgbouncer needs the plaintext
+      # credential to authenticate upstream; clients also do SCRAM (pg lib supports it).
+      AUTH_TYPE: scram-sha-256
+      POOL_MODE: transaction
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      # Full-path check: psql runs through pgbouncer into postgres.
+      test:
+        [
+          "CMD-SHELL",
+          "PGPASSWORD=${POSTGRES_PASSWORD:-nexus_dev_password} psql -h 127.0.0.1 -p 5432 -U ${POSTGRES_USER:-nexus} -d ${POSTGRES_DB:-nexus} -c 'select 1' >/dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    # Cache role: bound memory and evict least-recently-used keys when full.
+    # Use volatile-lru instead if Redis also stores data that must never be evicted.
+    command:
+      - redis-server
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  minio:
+    image: minio/minio:latest
+    container_name: nexus-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-nexus}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-nexus_minio_password}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 10s
+
+  # Gate service: waits until postgres, pgbouncer, redis AND minio are all
+  # healthy, so a plain `docker compose up -d` prints a "Healthy" line for them.
+  ready:
+    image: busybox:1.37
+    container_name: nexus-ready
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: ["tail", "-f", "/dev/null"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
