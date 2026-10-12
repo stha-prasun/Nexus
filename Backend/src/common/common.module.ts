@@ -16,7 +16,7 @@ import { TracingService } from './tracing/tracing.service';
 
 /**
  * Observability module: colored logging, request tracing with dependency
- * waterfalls, and in-memory metrics (GET /metrics + periodic summary).
+ * waterfalls, and in-memory metrics (GET /api/v1/metrics + periodic summary).
  *
  * Registered once in AppModule — `@Global()` means no other module has to
  * import it. `exports` still controls which providers those modules can

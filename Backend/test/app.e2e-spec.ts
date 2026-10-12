@@ -38,6 +38,7 @@ describe('Health (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    app.setGlobalPrefix('api/v1');
     await app.init();
   });
 
@@ -45,9 +46,9 @@ describe('Health (e2e)', () => {
     await app.close();
   });
 
-  it('GET /health returns 200 when all dependencies are up', async () => {
+  it('GET /api/v1/health returns 200 when all dependencies are up', async () => {
     const response = await request(app.getHttpServer())
-      .get('/health')
+      .get('/api/v1/health')
       .expect(200);
 
     expect(response.body).toEqual({
@@ -62,13 +63,13 @@ describe('Health (e2e)', () => {
     });
   });
 
-  it('GET /health returns 503 with per-check details when a dependency is down', async () => {
+  it('GET /api/v1/health returns 503 with per-check details when a dependency is down', async () => {
     redis.ping.mockRejectedValue(
       new Error('connect ECONNREFUSED 127.0.0.1:6379'),
     );
 
     const response = await request(app.getHttpServer())
-      .get('/health')
+      .get('/api/v1/health')
       .expect(503);
 
     expect(response.body.status).toBe('error');
