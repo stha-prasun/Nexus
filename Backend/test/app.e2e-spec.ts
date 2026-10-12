@@ -18,11 +18,13 @@ describe('Health (e2e)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    pool.query.mockResolvedValue(undefined);
-    pool.end.mockResolvedValue(undefined);
-    redis.ping.mockResolvedValue('PONG');
-    redis.quit.mockResolvedValue('OK');
-    minio.listBuckets.mockResolvedValue([]);
+    // Instrumentation replaces pool.query with a plain wrapper at bootstrap,
+    // so each test needs a fresh jest.fn for both mocking and re-wrapping.
+    pool.query = jest.fn().mockResolvedValue(undefined);
+    pool.end = jest.fn().mockResolvedValue(undefined);
+    redis.ping = jest.fn().mockResolvedValue('PONG');
+    redis.quit = jest.fn().mockResolvedValue('OK');
+    minio.listBuckets = jest.fn().mockResolvedValue([]);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],

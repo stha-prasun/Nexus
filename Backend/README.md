@@ -57,6 +57,37 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Observability
+
+Every request emits one colored line plus a dependency waterfall; timings turn
+yellow above `LATENCY_WARN_MS` and red above `LATENCY_ERROR_MS`:
+
+```
+14:05:51.693 INFO  [http] 200 GET /health · 82.0ms · trace 69c120827a1b3971
+├── postgres SELECT 1      70.7ms    86%
+├── redis ping             21.5ms    26%
+└── minio GET              25.3ms    31%
+```
+
+- The trace id is returned in the `x-request-id` response header; send your own
+  `x-request-id` to correlate across services.
+- `GET /metrics` returns live JSON: request rate, error rate, latency
+  percentiles (p50/p95/p99) per route and per dependency (postgres, redis,
+  minio), plus memory, CPU and event-loop lag.
+- A compact colored summary is logged every `METRICS_INTERVAL_MS` (default 30s;
+  set it below 1000 to disable).
+- One `AppLogger` instance feeds both app and Nest framework logs. Configure
+  via `.env` (see `.env.example`): `LOG_LEVEL`, `LOG_JSON`, `LATENCY_WARN_MS`,
+  `LATENCY_ERROR_MS`, `METRICS_INTERVAL_MS`, `ERROR_RATE_RED_PCT`,
+  `HEAP_WARN_RATIO`. Colors follow `NO_COLOR`/`FORCE_COLOR`/TTY.
+
+To capture a CPU profile of the built app:
+
+```bash
+$ npm run build
+$ npm run profile   # writes a .cpuprofile — open it in Chrome DevTools
+```
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

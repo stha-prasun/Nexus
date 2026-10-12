@@ -13,6 +13,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "profile": "node --cpu-prof dist/main",
     "lint": "biome check .",
     "test": "jest",
     "test:watch": "jest --watch",
