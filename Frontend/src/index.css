@@ -139,7 +139,7 @@
 }
 
 /* ===== Login page ===== */
-.canvas { background-color:#1F2FE0; background-image:radial-gradient(rgba(255,255,255,.18) 1.2px, transparent 1.2px); background-size:28px 28px; animation:drift 16s linear infinite; }
+.canvas { background-color:#1F2FE0; background-image:radial-gradient(rgba(255,255,255,.32) 1.5px, transparent 1.5px); background-size:28px 28px; animation:drift 16s linear infinite; }
 .t { font:600 15px Figtree,sans-serif; fill:#14183A; }
 .av { font:600 10px Figtree,sans-serif; fill:#5A6080; text-anchor:middle; }
 .chip,.s-in,.ripple { transform-box:fill-box; transform-origin:center; }
