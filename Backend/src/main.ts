@@ -10,6 +10,14 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger });
   app.enableShutdownHooks();
   app.setGlobalPrefix('api/v1');
+  // Vite frontend (:5173 by default) calls the API cross-origin with cookies.
+  app.enableCors({
+    origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter((origin) => origin.length > 0),
+    credentials: true,
+  });
   setupSwagger(app, logger);
 
   process.on('uncaughtException', (error: Error) => {

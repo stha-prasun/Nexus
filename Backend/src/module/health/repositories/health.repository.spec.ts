@@ -1,6 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { POSTGRES_POOL } from '../../database/constants/database.contants';
-import { MINIO_CLIENT, REDIS_CLIENT } from '../constants/health.contants';
+import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
+import { MINIO_CLIENT } from '../constants/health.contants';
 import { HealthRepository } from './health.repository';
 
 describe('HealthRepository', () => {
@@ -74,12 +75,5 @@ describe('HealthRepository', () => {
     expect(checks.postgres.status).toBe('down');
     expect(checks.redis.status).toBe('down');
     expect(checks.minio.status).toBe('down');
-  });
-
-  it('closes the redis client on shutdown, not the pool it does not own', async () => {
-    await repository.onModuleDestroy();
-
-    expect(redis.quit).toHaveBeenCalledTimes(1);
-    expect(pool.end).not.toHaveBeenCalled();
   });
 });

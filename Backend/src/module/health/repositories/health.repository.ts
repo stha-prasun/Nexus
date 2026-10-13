@@ -1,16 +1,20 @@
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import type { Client } from 'minio';
 import type { Pool } from 'pg';
 import { POSTGRES_POOL } from '../../database/constants/database.contants';
-import { MINIO_CLIENT, REDIS_CLIENT } from '../constants/health.contants';
+import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
+import { MINIO_CLIENT } from '../constants/health.contants';
 import type {
   CheckResult,
   DependencyName,
 } from '../interfaces/health.interfaces';
 
+// Connection ownership: postgres pool (DatabaseModule), redis client
+// (RedisModule) and minio client (HealthModule factory) are each closed by
+// their owner — this repository only probes them.
 @Injectable()
-export class HealthRepository implements OnModuleDestroy {
+export class HealthRepository {
   constructor(
     @Inject(POSTGRES_POOL) private readonly pool: Pool,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -24,11 +28,6 @@ export class HealthRepository implements OnModuleDestroy {
       this.timed(() => this.minio.listBuckets()),
     ]);
     return { postgres, redis, minio };
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    // The postgres pool is owned by DatabaseModule, which closes it.
-    await this.redis.quit();
   }
 
   private async timed(operation: () => Promise<unknown>): Promise<CheckResult> {

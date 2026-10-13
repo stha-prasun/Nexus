@@ -4,10 +4,8 @@ import type { Redis } from 'ioredis';
 import type { Client as MinioClient } from 'minio';
 import type { Pool } from 'pg';
 import { POSTGRES_POOL } from '../../module/database/constants/database.contants';
-import {
-  MINIO_CLIENT,
-  REDIS_CLIENT,
-} from '../../module/health/constants/health.contants';
+import { MINIO_CLIENT } from '../../module/health/constants/health.contants';
+import { REDIS_CLIENT } from '../../module/redis/constants/redis.constants';
 import { truncateMiddle } from '../format';
 import { AppLogger } from '../logger/logger';
 import type { SpanHandle } from './tracing.service';

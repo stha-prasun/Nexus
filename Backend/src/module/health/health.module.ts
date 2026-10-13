@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
-import { Redis } from 'ioredis';
 import { Client } from 'minio';
 import { DatabaseModule } from '../database/database.module';
-import { MINIO_CLIENT, REDIS_CLIENT } from './constants/health.contants';
+import { RedisModule } from '../redis/redis.module';
+import { MINIO_CLIENT } from './constants/health.contants';
 import { HealthController } from './health.controller';
 import { HealthService } from './health.service';
 import { HealthRepository } from './repositories/health.repository';
@@ -13,27 +13,11 @@ const env = (key: string, fallback: string): string =>
   process.env[key] ?? fallback;
 
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, RedisModule],
   controllers: [HealthController],
   providers: [
     HealthService,
     HealthRepository,
-    {
-      provide: REDIS_CLIENT,
-      useFactory: () => {
-        const client = new Redis({
-          host: env('REDIS_HOST', 'localhost'),
-          port: Number(env('REDIS_PORT', '6379')),
-          connectTimeout: 2000,
-          commandTimeout: 2000,
-          maxRetriesPerRequest: 1,
-          retryStrategy: (times) => Math.min(times * 200, 2000),
-        });
-        // Without a listener, a down redis would crash the process on 'error'.
-        client.on('error', () => undefined);
-        return client;
-      },
-    },
     {
       provide: MINIO_CLIENT,
       useFactory: () =>
@@ -46,6 +30,6 @@ const env = (key: string, fallback: string): string =>
         }),
     },
   ],
-  exports: [REDIS_CLIENT, MINIO_CLIENT],
+  exports: [MINIO_CLIENT],
 })
 export class HealthModule {}
