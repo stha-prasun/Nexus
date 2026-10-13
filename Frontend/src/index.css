@@ -7,7 +7,16 @@
 
 @theme inline {
     --font-heading: var(--font-sans);
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-sans: 'Figtree', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+    --color-cobalt: #1f2fe0;
+    --color-cobalt-dark: #1521b5;
+    --color-ink: #14183a;
+    --color-ink-soft: #5a6080;
+    --color-ink-line: #d5d9ec;
+    --color-sun: #ffd83d;
+    --color-sun-dark: #f2c70f;
+    --color-mist: #eef0f8;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -127,4 +136,62 @@
   html {
     @apply font-sans;
     }
+}
+
+/* ===== Login page ===== */
+.canvas { background-color:#1F2FE0; background-image:radial-gradient(rgba(255,255,255,.18) 1.2px, transparent 1.2px); background-size:28px 28px; animation:drift 16s linear infinite; }
+.t { font:600 15px Figtree,sans-serif; fill:#14183A; }
+.av { font:600 10px Figtree,sans-serif; fill:#5A6080; text-anchor:middle; }
+.chip,.s-in,.ripple { transform-box:fill-box; transform-origin:center; }
+
+/* 1. Panel rises first, its contents follow */
+.panel-wrap { animation:panelIn .7s cubic-bezier(.2,.7,.2,1) backwards; }
+#panel > * { animation:rise .6s cubic-bezier(.2,.7,.2,1) backwards; animation-delay:calc(.15s + var(--i,0) * .06s); }
+#panel > *:nth-child(1) { --i:0; }
+#panel > *:nth-child(2) { --i:1; }
+#panel > *:nth-child(3) { --i:2; }
+#panel > *:nth-child(4) { --i:3; }
+#panel > *:nth-child(5) { --i:4; }
+#panel > *:nth-child(6) { --i:5; }
+#panel > *:nth-child(7) { --i:6; }
+/* 2. Lines grow outward from the panel, chips pop in as each line arrives */
+.edge-out { stroke-dasharray:1; stroke-dashoffset:-1; animation:drawOut 1s cubic-bezier(.3,.6,.2,1) var(--d) forwards; }
+.edge-in  { stroke-dasharray:1; stroke-dashoffset:1;  animation:drawIn .7s ease-out var(--d) forwards; }
+.chip { animation:chipIn .6s cubic-bezier(.3,1.5,.5,1) var(--d) backwards; }
+.check { stroke-dasharray:1; stroke-dashoffset:1; animation:drawIn .4s ease-out var(--c) forwards; }
+/* 3. Work gets done: one state fades out, the next pops in at time --t */
+.s-out { animation:fadeOut .25s var(--t) forwards; }
+.s-in  { opacity:0; animation:popIn .5s cubic-bezier(.3,1.4,.5,1) var(--t) forwards; }
+.ripple { animation:ripple .8s ease-out var(--t) forwards; }
+.lbl { animation:toMuted .4s var(--t) forwards; }
+.strike { stroke-dasharray:1; stroke-dashoffset:1; animation:drawIn .4s ease-out calc(var(--t) + .1s) forwards; }
+/* 4. Ambient: sonar rings from the panel, graph brightens while typing */
+.ring { position:absolute; inset:0; border:1.5px solid rgba(255,255,255,.55); border-radius:6px; box-shadow:0 0 0 3px #3b82f67f; opacity:0; animation:ring 5s ease-out var(--d,1.6s) infinite; }
+.edges { transition:stroke .4s; }
+.graph.active .edges { stroke:rgba(255,255,255,.9); }
+/* Feedback */
+#form-error:not(.hidden) { animation:rise .3s ease-out; }
+.shake { animation:shake .45s ease-in-out; }
+
+@keyframes drift { to { background-position:28px 28px; } }
+@keyframes panelIn { from { opacity:0; transform:translateY(24px) scale(.98); } }
+@keyframes rise { from { opacity:0; transform:translateY(10px); } }
+@keyframes drawOut { from { stroke-dashoffset:-1; } to { stroke-dashoffset:0; } }
+@keyframes drawIn { from { stroke-dashoffset:1; } to { stroke-dashoffset:0; } }
+@keyframes chipIn { from { opacity:0; transform:scale(.85); } }
+@keyframes fadeOut { to { opacity:0; } }
+@keyframes popIn { 0% { opacity:0; transform:scale(.3); } 60% { opacity:1; transform:scale(1.2); } 100% { opacity:1; transform:scale(1); } }
+@keyframes ripple { from { opacity:.9; transform:scale(1); } to { opacity:0; transform:scale(3); } }
+@keyframes toMuted { to { fill:#5A6080; } }
+@keyframes ring { 0% { opacity:.45; transform:scale(1); } 100% { opacity:0; transform:scale(1.22); } }
+@keyframes shake { 20%,60% { transform:translateX(-6px); } 40%,80% { transform:translateX(6px); } }
+
+/* Reduced motion: skip straight to the final state */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation:none !important; transition:none !important; }
+  .edge-out,.edge-in,.check,.strike { stroke-dashoffset:0; }
+  .s-out,.ring { opacity:0; }
+  .s-in { opacity:1; }
+  .ripple { opacity:0; }
+  .lbl { fill:#5A6080; }
 }
