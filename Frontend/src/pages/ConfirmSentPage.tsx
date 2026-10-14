@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import { Link, useLocation } from 'react-router';
+import { ResendConfirmation } from '@/components/auth/ResendConfirmation';
+import { getPendingEmail } from '@/lib/resend';
 
 interface ConfirmSentState {
   email?: string;
@@ -8,7 +10,8 @@ interface ConfirmSentState {
 export function ConfirmSentPage() {
   const location = useLocation();
   const state = location.state as ConfirmSentState | null;
-  const email = state?.email;
+  // Router state is lost on refresh — fall back to the value saved at signup.
+  const email = state?.email ?? getPendingEmail() ?? undefined;
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -72,6 +75,8 @@ export function ConfirmSentPage() {
             Open the link on any device to activate your account. Give it a
             minute, and check your spam folder if it hasn&apos;t arrived.
           </p>
+
+          <ResendConfirmation email={email} />
 
           <p className="mt-6 text-center text-sm text-ink-soft">
             <Link

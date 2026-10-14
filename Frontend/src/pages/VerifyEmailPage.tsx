@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { ResendConfirmation } from '@/components/auth/ResendConfirmation';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
 import { ApiError, verifyEmail } from '@/lib/api';
+import { clearPendingEmail, getPendingEmail } from '@/lib/resend';
 
 type Status = 'verifying' | 'verified' | 'invalid' | 'network';
 
@@ -26,7 +28,7 @@ const MESSAGES: Record<Status, string> = {
   verifying: 'Hang tight — we’re checking your confirmation link.',
   verified: 'Your email address is confirmed. Your Nexus account is ready.',
   invalid:
-    'This confirmation link has already been used, or it’s older than 24 hours. Sign up again to get a fresh one.',
+    'This confirmation link has already been used, or it’s older than 24 hours. Request a new one below.',
   network: 'We couldn’t contact Nexus. Check your connection and try again.',
 };
 
@@ -48,6 +50,7 @@ export function VerifyEmailPage() {
       const result = await verifyEmail(token);
       if (result.status === 'verified') {
         sessionStorage.setItem(STORAGE_PREFIX + token, '1');
+        clearPendingEmail();
         setStatus('verified');
       } else {
         setStatus('invalid');
@@ -238,9 +241,12 @@ export function VerifyEmailPage() {
             </Link>
           )}
           {status === 'invalid' && (
-            <Link to="/signup" className={SUN_BUTTON}>
-              Start over
-            </Link>
+            <>
+              <ResendConfirmation email={getPendingEmail()} />
+              <Link to="/signup" className={SUN_BUTTON}>
+                Start over
+              </Link>
+            </>
           )}
           {status === 'network' && (
             <button type="button" onClick={retry} className={SUN_BUTTON}>

@@ -73,6 +73,23 @@ export function register(payload: RegisterPayload): Promise<RegisterResponse> {
   return apiPost<RegisterResponse>('/auth/register', payload);
 }
 
+export interface ResendConfirmationResponse {
+  message: string;
+}
+
+/**
+ * Ask the backend to issue a fresh confirmation link and email it again.
+ * The server always answers 202 with the same body (regardless of whether
+ * the account exists / is unverified) so callers can't probe for emails.
+ */
+export function resendConfirmation(
+  email: string,
+): Promise<ResendConfirmationResponse> {
+  return apiPost<ResendConfirmationResponse>('/auth/resend-confirmation', {
+    email,
+  });
+}
+
 export interface VerifyEmailResponse {
   status: 'verified' | 'invalid_or_expired';
 }

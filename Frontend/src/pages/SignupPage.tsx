@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ApiError, type Role, register } from '@/lib/api';
+import { setPendingEmail, startCooldown } from '@/lib/resend';
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'PM', label: 'Project Manager' },
@@ -118,6 +119,10 @@ export function SignupPage() {
     setSubmitting(true);
     try {
       await register({ name, email, password, role });
+      // Persist for /confirm-sent refresh + /verify-email resend; start the
+      // 5-minute resend cooldown now (the confirmation mail just went out).
+      setPendingEmail(email);
+      startCooldown();
       navigate('/confirm-sent', { state: { email } });
     } catch (error) {
       if (error instanceof ApiError && error.status === 429) {
