@@ -13,7 +13,7 @@ import {
   buildVerifyEmail,
   buildVerifyEmailLink,
 } from '../templates/verify-email';
-import { classifySmtpError } from './smtp-error';
+import { classifyMailError } from './mail-error';
 
 const env = (key: string, fallback: string): string =>
   process.env[key] ?? fallback;
@@ -77,7 +77,7 @@ export class SendVerificationProcessor {
         userId,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw classifySmtpError(error);
+      throw classifyMailError(error);
     }
 
     return { status: 'sent' };

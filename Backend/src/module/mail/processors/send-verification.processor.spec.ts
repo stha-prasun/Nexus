@@ -2,6 +2,7 @@ import { type Job, UnrecoverableError } from 'bullmq';
 import { AppLogger } from '../../../common/logger/logger';
 import type { Database } from '../../database/interfaces/database.interfaces';
 import type { MailService } from '../mail.service';
+import { MailTransportError } from '../transports/mail-transport';
 import { SendVerificationProcessor } from './send-verification.processor';
 
 describe('SendVerificationProcessor', () => {
@@ -92,9 +93,7 @@ describe('SendVerificationProcessor', () => {
   it('throws a retryable error for transient SMTP failures (4xx)', async () => {
     redis.get.mockResolvedValue('tok123');
     selectResult.mockResolvedValue([userRow]);
-    const transient = Object.assign(new Error('timeout'), {
-      responseCode: 451,
-    });
+    const transient = new MailTransportError('timeout', false);
     mailService.send.mockRejectedValue(transient);
 
     await expect(processor.process(job(userId))).rejects.toThrow('timeout');
@@ -103,13 +102,39 @@ describe('SendVerificationProcessor', () => {
   it('throws UnrecoverableError for permanent SMTP failures (5xx)', async () => {
     redis.get.mockResolvedValue('tok123');
     selectResult.mockResolvedValue([userRow]);
-    const permanent = Object.assign(new Error('no such user'), {
-      responseCode: 550,
-    });
+    const permanent = new MailTransportError('no such user', true);
     mailService.send.mockRejectedValue(permanent);
 
     await expect(processor.process(job(userId))).rejects.toBeInstanceOf(
       UnrecoverableError,
+    );
+  });
+
+  it('throws UnrecoverableError for permanent Resend failures', async () => {
+    redis.get.mockResolvedValue('tok123');
+    selectResult.mockResolvedValue([userRow]);
+    const permanent = new MailTransportError(
+      'Resend invalid_from_address: ...',
+      true,
+    );
+    mailService.send.mockRejectedValue(permanent);
+
+    await expect(processor.process(job(userId))).rejects.toBeInstanceOf(
+      UnrecoverableError,
+    );
+  });
+
+  it('keeps Resend rate-limit failures retryable', async () => {
+    redis.get.mockResolvedValue('tok123');
+    selectResult.mockResolvedValue([userRow]);
+    const rateLimited = new MailTransportError(
+      'Resend rate_limit_exceeded: ...',
+      false,
+    );
+    mailService.send.mockRejectedValue(rateLimited);
+
+    await expect(processor.process(job(userId))).rejects.toThrow(
+      'rate_limit_exceeded',
     );
   });
 });

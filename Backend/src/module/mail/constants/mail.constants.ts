@@ -6,6 +6,9 @@ export const JOB_SEND_ACCOUNT_EXISTS = 'send-account-exists';
 export const MAIL_QUEUE = 'MAIL_QUEUE';
 export const MAIL_WORKER = 'MAIL_WORKER';
 
+/** Injection token for the env-selected mail transport (SMTP, Resend, …). */
+export const MAIL_TRANSPORT = 'MAIL_TRANSPORT';
+
 const concurrency = Number(process.env.MAIL_WORKER_CONCURRENCY ?? 3);
 
 /** In-process worker concurrency (default 3). */

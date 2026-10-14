@@ -7,7 +7,7 @@ import type { Database } from '../../database/interfaces/database.interfaces';
 import { users } from '../../database/schema';
 import { MailService } from '../mail.service';
 import { buildAccountExistsEmail } from '../templates/account-exists';
-import { classifySmtpError } from './smtp-error';
+import { classifyMailError } from './mail-error';
 
 export interface AccountExistsJobResult {
   status: 'sent' | 'skipped';
@@ -53,7 +53,7 @@ export class SendAccountExistsProcessor {
         userId,
         error: error instanceof Error ? error.message : String(error),
       });
-      throw classifySmtpError(error);
+      throw classifyMailError(error);
     }
 
     return { status: 'sent' };
