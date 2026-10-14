@@ -15,6 +15,13 @@
       "when": 1791903818451,
       "tag": "0001_hot_yellowjacket",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791962171165,
+      "tag": "0002_new_wolf_cub",
+      "breakpoints": true
     }
   ]
 }

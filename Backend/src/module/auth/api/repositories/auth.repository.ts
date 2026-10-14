@@ -34,7 +34,7 @@ export class AuthRepository {
     return row ? toEntity(row) : null;
   }
 
-  async findById(id: number): Promise<User | null> {
+  async findById(id: string): Promise<User | null> {
     const rows = await this.db
       .select()
       .from(users)

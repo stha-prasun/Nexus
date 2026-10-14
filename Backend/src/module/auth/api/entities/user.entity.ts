@@ -1,7 +1,7 @@
 import type { Role } from '../constants/auth.constants';
 
 export interface UserProps {
-  id?: number;
+  id?: string;
   name: string;
   email: string;
   role: Role;
@@ -17,7 +17,7 @@ export interface UserProps {
 export class User {
   constructor(private readonly props: UserProps) {}
 
-  get id(): number | undefined {
+  get id(): string | undefined {
     return this.props.id;
   }
 

@@ -23,11 +23,12 @@ describe('SendVerificationProcessor', () => {
     child: () => ({ error: jest.fn(), info: jest.fn() }),
   };
 
-  const job = (userId: number) =>
-    ({ data: { userId } }) as Job<{ userId: number }>;
+  const job = (userId: string) =>
+    ({ data: { userId } }) as Job<{ userId: string }>;
 
+  const userId = '00000000-0000-4000-8000-000000000005';
   const userRow = {
-    id: 5,
+    id: userId,
     name: 'Ada Lovelace',
     email: 'ada@example.com',
     emailVerifiedAt: null as Date | null,
@@ -48,7 +49,7 @@ describe('SendVerificationProcessor', () => {
     redis.get.mockResolvedValue('tok123');
     selectResult.mockResolvedValue([userRow]);
 
-    const result = await processor.process(job(5));
+    const result = await processor.process(job(userId));
 
     expect(result).toEqual({ status: 'sent' });
     expect(mailService.send).toHaveBeenCalledWith(
@@ -63,7 +64,7 @@ describe('SendVerificationProcessor', () => {
   it('skips when the token is gone (expired or already consumed)', async () => {
     redis.get.mockResolvedValue(null);
 
-    const result = await processor.process(job(5));
+    const result = await processor.process(job(userId));
 
     expect(result).toEqual({ status: 'skipped' });
     expect(mailService.send).not.toHaveBeenCalled();
@@ -74,7 +75,7 @@ describe('SendVerificationProcessor', () => {
     redis.get.mockResolvedValue('tok123');
     selectResult.mockResolvedValue([]);
 
-    expect(await processor.process(job(5))).toEqual({ status: 'skipped' });
+    expect(await processor.process(job(userId))).toEqual({ status: 'skipped' });
     expect(mailService.send).not.toHaveBeenCalled();
   });
 
@@ -84,7 +85,7 @@ describe('SendVerificationProcessor', () => {
       { ...userRow, emailVerifiedAt: new Date() },
     ]);
 
-    expect(await processor.process(job(5))).toEqual({ status: 'skipped' });
+    expect(await processor.process(job(userId))).toEqual({ status: 'skipped' });
     expect(mailService.send).not.toHaveBeenCalled();
   });
 
@@ -96,7 +97,7 @@ describe('SendVerificationProcessor', () => {
     });
     mailService.send.mockRejectedValue(transient);
 
-    await expect(processor.process(job(5))).rejects.toThrow('timeout');
+    await expect(processor.process(job(userId))).rejects.toThrow('timeout');
   });
 
   it('throws UnrecoverableError for permanent SMTP failures (5xx)', async () => {
@@ -107,7 +108,7 @@ describe('SendVerificationProcessor', () => {
     });
     mailService.send.mockRejectedValue(permanent);
 
-    await expect(processor.process(job(5))).rejects.toBeInstanceOf(
+    await expect(processor.process(job(userId))).rejects.toBeInstanceOf(
       UnrecoverableError,
     );
   });

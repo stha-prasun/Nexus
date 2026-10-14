@@ -14,8 +14,11 @@ type Chain = {
   returning: jest.Mock;
 };
 
+const uuid1 = '00000000-0000-4000-8000-000000000001';
+const uuid42 = '00000000-0000-4000-8000-000000000042';
+
 const row = {
-  id: 1,
+  id: uuid1,
   email: 'ada@example.com',
   name: 'Ada Lovelace',
   role: 'Dev' as Role,
@@ -100,13 +103,13 @@ describe('AuthRepository', () => {
   it('findById constructs a User entity from the row', async () => {
     selectResult.mockResolvedValue([row]);
 
-    const user = await repository.findById(1);
+    const user = await repository.findById(uuid1);
 
-    expect(user?.id).toBe(1);
+    expect(user?.id).toBe(uuid1);
   });
 
   it('insert maps entity fields to columns and returns a new entity with id', async () => {
-    insertResult.mockResolvedValue([{ ...row, id: 42 }]);
+    insertResult.mockResolvedValue([{ ...row, id: uuid42 }]);
 
     const created = await repository.insert(
       new User({
@@ -120,7 +123,7 @@ describe('AuthRepository', () => {
     );
 
     expect(created).toBeInstanceOf(User);
-    expect(created.id).toBe(42);
+    expect(created.id).toBe(uuid42);
   });
 
   it('save updates derived fields (emailVerifiedAt) from the entity', async () => {
@@ -154,6 +157,8 @@ describe('AuthRepository', () => {
     updateResult.mockResolvedValue([]);
     const user = new User({ ...row });
 
-    await expect(repository.save(user)).rejects.toThrow('User 1 not found');
+    await expect(repository.save(user)).rejects.toThrow(
+      `User ${uuid1} not found`,
+    );
   });
 });

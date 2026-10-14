@@ -19,7 +19,7 @@ describe('SessionService', () => {
   };
 
   const user = {
-    userId: 7,
+    userId: '00000000-0000-4000-8000-000000000007',
     role: 'Dev' as const,
     name: 'Ada Lovelace',
     email: 'ada@example.com',

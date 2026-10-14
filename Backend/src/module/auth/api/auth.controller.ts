@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiOkResponse,
   ApiOperation,
@@ -36,9 +37,19 @@ export class AuthController {
   @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @ApiOperation({
     summary:
-      'Create an account and send a confirmation email (identical response whether or not the email exists)',
+      'Create an account and send a confirmation email; 409 when the email already exists (taken vs unverified)',
   })
   @ApiCreatedResponse({ type: RegisterResponseDto })
+  @ApiConflictResponse({
+    description:
+      '409 { status: "email_taken" | "email_unverified", message } — email belongs to an existing account',
+    schema: {
+      example: {
+        status: 'email_taken',
+        message: 'This email is already registered. Try signing in instead.',
+      },
+    },
+  })
   register(@Body() dto: RegisterDto): Promise<RegisterResponseDto> {
     return this.authService.register(dto);
   }

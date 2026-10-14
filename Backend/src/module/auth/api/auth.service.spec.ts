@@ -1,9 +1,12 @@
+import { ConflictException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { AppLogger } from '../../../common/logger/logger';
 import { MailQueue } from '../../mail/mail.queue';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
 import { AuthService } from './auth.service';
 import {
+  EMAIL_TAKEN_MESSAGE,
+  EMAIL_UNVERIFIED_MESSAGE,
   REGISTER_MESSAGE,
   RESEND_CONFIRMATION_MESSAGE,
   VERIFICATION_TOKEN_TTL_SECONDS,
@@ -12,6 +15,10 @@ import type { RegisterDto } from './dto/register.dto';
 import { User } from './entities/user.entity';
 import { UserFactory } from './factories/user.factory';
 import { AuthRepository } from './repositories/auth.repository';
+
+/** Deterministic uuid-shaped fixture ids (users.id is uuid since 0002). */
+const uuid = (n: number): string =>
+  `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -41,7 +48,7 @@ describe('AuthService', () => {
     overrides: Partial<ConstructorParameters<typeof User>[0]> = {},
   ) =>
     new User({
-      id: 1,
+      id: uuid(1),
       name: 'Ada Lovelace',
       email: 'ada@example.com',
       role: 'Dev',
@@ -56,6 +63,18 @@ describe('AuthService', () => {
     email: 'ada@example.com',
     password: 'Sup3r!Secret',
     role: 'Dev',
+  };
+
+  const conflictFrom = async (
+    promise: Promise<unknown>,
+  ): Promise<ConflictException> => {
+    try {
+      await promise;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      return error as ConflictException;
+    }
+    throw new Error('expected a ConflictException, but the call resolved');
   };
 
   beforeEach(async () => {
@@ -83,7 +102,7 @@ describe('AuthService', () => {
 
   describe('register', () => {
     it('creates a new user, writes token keys, then enqueues (new user branch)', async () => {
-      const user = buildUser({ id: 42 });
+      const user = buildUser({ id: uuid(42) });
       repository.findByEmail.mockResolvedValue(null);
       userFactory.create.mockResolvedValue(user);
       repository.insert.mockResolvedValue(user);
@@ -94,35 +113,46 @@ describe('AuthService', () => {
       expect(repository.insert).toHaveBeenCalledWith(user);
       expect(pipeline.set).toHaveBeenCalledTimes(2);
       expect(pipeline.exec).toHaveBeenCalledTimes(1);
-      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(42);
+      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(uuid(42));
       expect(result).toEqual({ message: REGISTER_MESSAGE });
     });
 
-    it('regenerates the token for an existing unverified account', async () => {
-      const user = buildUser({ id: 5 });
+    it('conflicts with email_unverified for an existing unverified account (no email, no token writes)', async () => {
+      const user = buildUser({ id: uuid(5) });
       repository.findByEmail.mockResolvedValue(user);
 
-      const result = await service.register(dto);
+      const conflict = await conflictFrom(service.register(dto));
 
+      expect(conflict.getStatus()).toBe(409);
+      expect(conflict.getResponse()).toEqual({
+        status: 'email_unverified',
+        message: EMAIL_UNVERIFIED_MESSAGE,
+      });
       expect(userFactory.create).not.toHaveBeenCalled();
-      expect(pipeline.set).toHaveBeenCalledTimes(2);
-      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(5);
-      expect(result).toEqual({ message: REGISTER_MESSAGE });
+      expect(repository.insert).not.toHaveBeenCalled();
+      expect(pipeline.set).not.toHaveBeenCalled();
+      expect(mailQueue.enqueueVerification).not.toHaveBeenCalled();
+      expect(mailQueue.enqueueAccountExists).not.toHaveBeenCalled();
     });
 
-    it('sends an account-exists notice for a verified account, same response', async () => {
-      const user = buildUser({ id: 5, emailVerifiedAt: new Date() });
+    it('conflicts with email_taken for a verified account and notifies the owner', async () => {
+      const user = buildUser({ id: uuid(5), emailVerifiedAt: new Date() });
       repository.findByEmail.mockResolvedValue(user);
 
-      const result = await service.register(dto);
+      const conflict = await conflictFrom(service.register(dto));
 
-      expect(mailQueue.enqueueAccountExists).toHaveBeenCalledWith(5);
+      expect(conflict.getStatus()).toBe(409);
+      expect(conflict.getResponse()).toEqual({
+        status: 'email_taken',
+        message: EMAIL_TAKEN_MESSAGE,
+      });
+      expect(mailQueue.enqueueAccountExists).toHaveBeenCalledWith(uuid(5));
       expect(mailQueue.enqueueVerification).not.toHaveBeenCalled();
-      expect(result).toEqual({ message: REGISTER_MESSAGE });
+      expect(pipeline.set).not.toHaveBeenCalled();
     });
 
     it('treats a unique-violation race (23505) as the existing branch', async () => {
-      const existing = buildUser({ id: 9 });
+      const existing = buildUser({ id: uuid(9) });
       repository.findByEmail
         .mockResolvedValueOnce(null)
         .mockResolvedValueOnce(existing);
@@ -131,10 +161,13 @@ describe('AuthService', () => {
         Object.assign(new Error('dup'), { code: '23505' }),
       );
 
-      const result = await service.register(dto);
+      const conflict = await conflictFrom(service.register(dto));
 
-      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(9);
-      expect(result).toEqual({ message: REGISTER_MESSAGE });
+      expect(conflict.getResponse()).toMatchObject({
+        status: 'email_unverified',
+      });
+      expect(mailQueue.enqueueVerification).not.toHaveBeenCalled();
+      expect(pipeline.set).not.toHaveBeenCalled();
     });
 
     it('rethrows non-unique insert errors', async () => {
@@ -145,8 +178,8 @@ describe('AuthService', () => {
       await expect(service.register(dto)).rejects.toThrow('boom');
     });
 
-    it('still returns 201-equivalent when enqueue fails (logged, not thrown)', async () => {
-      const user = buildUser({ id: 3 });
+    it('still returns the 201 message when enqueue fails (logged, not thrown)', async () => {
+      const user = buildUser({ id: uuid(3) });
       repository.findByEmail.mockResolvedValue(null);
       userFactory.create.mockResolvedValue(user);
       repository.insert.mockResolvedValue(user);
@@ -156,12 +189,22 @@ describe('AuthService', () => {
 
       expect(result).toEqual({ message: REGISTER_MESSAGE });
     });
+
+    it('still throws email_taken when the notice enqueue fails', async () => {
+      const user = buildUser({ id: uuid(5), emailVerifiedAt: new Date() });
+      repository.findByEmail.mockResolvedValue(user);
+      mailQueue.enqueueAccountExists.mockRejectedValue(new Error('redis down'));
+
+      const conflict = await conflictFrom(service.register(dto));
+
+      expect(conflict.getResponse()).toMatchObject({ status: 'email_taken' });
+    });
   });
 
   describe('verifyEmail', () => {
     it('verifies, saves and deletes both keys on a valid token', async () => {
-      const user = buildUser({ id: 11 });
-      redis.get.mockResolvedValue('11');
+      const user = buildUser({ id: uuid(11) });
+      redis.get.mockResolvedValue(uuid(11));
       repository.findById.mockResolvedValue(user);
       repository.save.mockImplementation(async (u: User) => u);
 
@@ -183,7 +226,7 @@ describe('AuthService', () => {
     });
 
     it('returns invalid_or_expired when the user no longer exists, and cleans keys', async () => {
-      redis.get.mockResolvedValue('99');
+      redis.get.mockResolvedValue(uuid(99));
       repository.findById.mockResolvedValue(null);
 
       const result = await service.verifyEmail('orphan');
@@ -194,8 +237,8 @@ describe('AuthService', () => {
 
     it('is idempotent for an already-verified user', async () => {
       const verifiedAt = new Date('2026-01-02T00:00:00Z');
-      const user = buildUser({ id: 11, emailVerifiedAt: verifiedAt });
-      redis.get.mockResolvedValue('11');
+      const user = buildUser({ id: uuid(11), emailVerifiedAt: verifiedAt });
+      redis.get.mockResolvedValue(uuid(11));
       repository.findById.mockResolvedValue(user);
 
       const result = await service.verifyEmail('sometoken');
@@ -208,7 +251,7 @@ describe('AuthService', () => {
 
   describe('resendConfirmation', () => {
     it('regenerates the token for an unverified account', async () => {
-      const user = buildUser({ id: 8 });
+      const user = buildUser({ id: uuid(8) });
       repository.findByEmail.mockResolvedValue(user);
 
       const result = await service.resendConfirmation({ email: dto.email });
@@ -216,11 +259,11 @@ describe('AuthService', () => {
       expect(pipeline.set).toHaveBeenCalledTimes(2);
       expect(pipeline.set).toHaveBeenCalledWith(
         expect.stringContaining('auth:verify:'),
-        '8',
+        uuid(8),
         'EX',
         VERIFICATION_TOKEN_TTL_SECONDS,
       );
-      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(8);
+      expect(mailQueue.enqueueVerification).toHaveBeenCalledWith(uuid(8));
       expect(result).toEqual({ message: RESEND_CONFIRMATION_MESSAGE });
     });
 

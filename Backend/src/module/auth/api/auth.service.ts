@@ -1,10 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
 import { AppLogger } from '../../../common/logger/logger';
 import { MailQueue } from '../../mail/mail.queue';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
 import {
+  EMAIL_TAKEN_MESSAGE,
+  EMAIL_UNVERIFIED_MESSAGE,
   REGISTER_MESSAGE,
   RESEND_CONFIRMATION_MESSAGE,
   VERIFICATION_TOKEN_TTL_SECONDS,
@@ -23,8 +25,9 @@ const isUniqueViolation = (error: unknown): boolean =>
   (error as { code?: unknown }).code === '23505';
 
 /**
- * Registration + email-confirmation orchestration. All register/resend
- * responses are identical regardless of account state (no enumeration).
+ * Registration + email-confirmation orchestration. New accounts get a
+ * verification link; existing accounts get an honest 409 (taken vs
+ * unverified) — no enumeration hedge, no password/token changes.
  * No session is created in this pass — login is a later feature.
  */
 @Injectable()
@@ -43,10 +46,12 @@ export class AuthService {
 
   async register(dto: RegisterDto): Promise<{ message: string }> {
     let user = await this.repository.findByEmail(dto.email);
+    let created = false;
 
     if (user === null) {
       try {
         user = await this.repository.insert(await this.userFactory.create(dto));
+        created = true;
       } catch (error) {
         if (!isUniqueViolation(error)) throw error;
         // Unique-index race: someone registered between SELECT and INSERT.
@@ -55,11 +60,22 @@ export class AuthService {
       }
     }
 
-    if (user.isVerified) {
-      await this.safeEnqueue(() =>
-        this.mailQueue.enqueueAccountExists(user.id as number),
-      );
-      return { message: REGISTER_MESSAGE };
+    if (!created) {
+      if (user.isVerified) {
+        // Tell the owner someone tried to register with their address.
+        await this.safeEnqueue(() =>
+          this.mailQueue.enqueueAccountExists(user.id as string),
+        );
+        throw new ConflictException({
+          status: 'email_taken',
+          message: EMAIL_TAKEN_MESSAGE,
+        });
+      }
+      // Unverified: never touch the password, token or mailbox — just say so.
+      throw new ConflictException({
+        status: 'email_unverified',
+        message: EMAIL_UNVERIFIED_MESSAGE,
+      });
     }
 
     await this.issueVerificationToken(user);
@@ -69,14 +85,14 @@ export class AuthService {
   async verifyEmail(
     token: string,
   ): Promise<{ status: 'verified' | 'invalid_or_expired' }> {
-    const userIdRaw = await this.redis.get(verificationTokenKey(token));
-    if (userIdRaw === null) {
+    const userId = await this.redis.get(verificationTokenKey(token));
+    if (userId === null) {
       return { status: 'invalid_or_expired' };
     }
 
-    const user = await this.repository.findById(Number(userIdRaw));
+    const user = await this.repository.findById(userId);
     if (user === null) {
-      await this.consumeToken(token, Number(userIdRaw));
+      await this.consumeToken(token, userId);
       return { status: 'invalid_or_expired' };
     }
 
@@ -84,7 +100,7 @@ export class AuthService {
       user.markEmailVerified();
       await this.repository.save(user);
     }
-    await this.consumeToken(token, user.id as number);
+    await this.consumeToken(token, user.id as string);
     return { status: 'verified' };
   }
 
@@ -100,13 +116,13 @@ export class AuthService {
 
   /** Token keys are written BEFORE enqueue — enqueue-first would race the worker. */
   private async issueVerificationToken(user: User): Promise<void> {
-    const userId = user.id as number;
+    const userId = user.id as string;
     const token = randomBytes(32).toString('hex');
 
     const pipeline = this.redis.pipeline();
     pipeline.set(
       verificationTokenKey(token),
-      String(userId),
+      userId,
       'EX',
       VERIFICATION_TOKEN_TTL_SECONDS,
     );
@@ -122,7 +138,7 @@ export class AuthService {
     await this.safeEnqueue(() => this.mailQueue.enqueueVerification(userId));
   }
 
-  private async consumeToken(token: string, userId: number): Promise<void> {
+  private async consumeToken(token: string, userId: string): Promise<void> {
     const pipeline = this.redis.pipeline();
     pipeline.del(verificationTokenKey(token));
     pipeline.del(verificationUserKey(userId));

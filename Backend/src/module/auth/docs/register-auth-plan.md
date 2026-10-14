@@ -87,7 +87,7 @@ Backend/src/
 │           │   └── auth-responses.dto.ts    register/verify/resend response DTOs
 │           └── constants/auth.constants.ts  verification TTL, ROLE list, message copies
 Backend/drizzle/0001_*.sql                   drizzle-kit generate (role, password_hash, email_verified_at)
-Backend/docker-compose.yml                    redis: allkeys-lru → volatile-lru (see §10)
+Backend/docker-compose.yml                    redis: allkeys-lru → noeviction (see §10)
 Backend/.env + .env.example                   new mail/session/cors vars (see §11)
 ```
 
@@ -106,13 +106,13 @@ All routes under the `/api/v1` global prefix.
 Body: `{ name, email, password, role }`
 
 - Pipe normalizes and validates (§5). Unknown fields silently stripped (`whitelist: true`).
-- **Always `201` with an identical body** — `{"message": "If this email is available, a confirmation link has been sent."}` — prevents account enumeration. Internal branches:
-  - **New user** → `factory.create(dto)` (bcrypt hash; DTO already normalized by pipe) → `repo.insert(user)` (returns entity with DB id, `emailVerifiedAt` unset) → generate token → write Redis token keys (`EX 24h`) → enqueue job → 201.
-  - **Existing + unverified** → regenerate token (invalidates old) → overwrite Redis keys → enqueue → 201.
-  - **Existing + verified** → send "you already have an account" notice (enqueue `account-exists` job or send inline) → 201.
+- **Honest responses by account state** (decision override of the original identical-201 anti-enumeration rule — explicit product choice):
+  - **New user** → `factory.create(dto)` (bcrypt hash; DTO already normalized by pipe) → `repo.insert(user)` (returns entity with DB uuid, `emailVerifiedAt` unset) → generate token → write Redis token keys (`EX 24h`) → enqueue job → `201 {"message": "<REGISTER_MESSAGE>"}`.
+  - **Existing + unverified** → `409 {"status":"email_unverified","message":...}` — no password change, no token regeneration, **no email sent** (user decision: message only).
+  - **Existing + verified** → enqueue `account-exists` notice to the owner → `409 {"status":"email_taken","message":...}`.
 - **Order is load-bearing:** token keys are written to Redis *before* enqueue — enqueue-first would race a worker that finds no token and skips.
-- Enqueue failure (Redis down) is logged loudly but still returns 201: the account exists and the resend endpoint recovers.
-- Postgres unique-violation race (`23505`) handled as the "existing" branch.
+- Enqueue failure (Redis down) is logged loudly but never leaks: a new user still gets 201; the 409 branches still throw.
+- Postgres unique-violation race (`23505`) handled as the "existing" branch (→ 409).
 
 ### 3.2 `GET /auth/verify-email?token=...`
 
@@ -136,7 +136,7 @@ Body: `{ email }` — normalized/validated identically to register. Throttled (3
 
 ```ts
 export interface UserProps {
-  id?: number;
+  id?: string;
   name: string;
   email: string;
   role: Role;
@@ -201,7 +201,7 @@ export class UserFactory {
 
 ```ts
 findByEmail(email: string): Promise<User | null>
-findById(id: number): Promise<User | null>
+findById(id: string): Promise<User | null>
 insert(user: User): Promise<User>   // drizzle insert + returning → new User({ id: row.id, ... })
 save(user: User): Promise<User>     // UPDATE derived from entity getters (e.g. emailVerifiedAt)
 ```
@@ -308,7 +308,7 @@ queue.add(JOB_SEND_VERIFICATION, { userId }, {
 
 | Risk | Mechanism | Result |
 |---|---|---|
-| Client retries `POST /register` | `users.email` unique index → `23505` handled as "existing" branch, identical 201 body | no duplicate user, same response |
+| Client retries `POST /register` | `users.email` unique index → `23505` handled as "existing" branch, 409 conflict | no duplicate user, same response |
 | Double-click verify link | token key deleted on consume; already-verified → idempotent 200 | no double side effects |
 | Email bursts (retry/resend storms) | BullMQ dedup + `keepLastIfActive` + throttler (register 5/10 min, resend 3/10 min) | ≤1 active + ≤1 pending job per user |
 | Stale token sent after resend | processor re-fetches **current** token at execution time | dead links minimized |
@@ -348,7 +348,7 @@ The register → token → enqueue sequence is sequential *by design* (race safe
 ## 9. Security pass
 
 - **Privilege escalation:** role whitelist-validated; `Admin` self-assignable (accepted). Allowed list is one constant/env (`ROLES` / optional `REGISTRATION_ROLES`) → restricting to `PM,Dev` later is a one-line change.
-- **Account enumeration:** identical responses on register/resend regardless of state; "already registered" delivered as an email to the owner, never in the API response.
+- **Account enumeration:** `register` answers honestly (409 `email_taken` / `email_unverified` — explicit product decision that supersedes the original identical-201 rule); `resend-confirmation` stays generic 202; register's 5/10 min throttle caps probing speed. The owner still gets the `account-exists` notice email.
 - **Email bombing / abuse:** global throttler (e.g. 100 req/60 s/IP) + `@Throttle` overrides: register 5/10 min, resend 3/10 min.
 - **Credential handling:** bcrypt only, hashed inside `UserFactory.create()`; `passwordHash` never in responses/logs (entity is never serialized directly — controllers return response DTOs); tokens never logged (also not in queue payloads).
 - **Validation:** server-authoritative; bounds enforced even though the UI validates; control characters stripped from name/email (log-injection hygiene).
@@ -361,7 +361,7 @@ The register → token → enqueue sequence is sequential *by design* (race safe
 
 ## 10. Scalability / ops
 
-- **Stateless app + Redis sessions** → multi-instance safe. ⚠️ **docker-compose Redis runs `allkeys-lru` — change to `volatile-lru`**: with BullMQ in the mix, LRU must never evict queue keys; `volatile-lru` only evicts TTL'd keys (sessions/verification tokens — recoverable) and protects queue integrity.
+- **Stateless app + Redis sessions** → multi-instance safe. **docker-compose Redis runs `noeviction`** (BullMQ's required policy): with the queue living in Redis, evicting keys would corrupt jobs — writes fail loudly at the 256mb ceiling instead of silently dropping queue data.
 - **In-process worker** shares the event loop; concurrency capped at 3. Extractable to a separate process later without code changes (processor already isolated).
 - **Queue lifetime decision:** BullMQ chosen because the user requested it; SMTP retries/backoff/dedup are exactly its strengths. (Without that directive this volume would not have justified a queue.)
 - **Email failure & `23505` race** both handled; no unbounded queries (email lookups use the unique index; see §8).
@@ -413,7 +413,7 @@ SESSION_COOKIE_SAME_SITE=lax
 7. `MailModule`: SMTP transport + template + `MailQueue` producer + `SendVerificationProcessor` (lifecycle hooks, concurrency 3, dedup config from §6).
 8. Auth: DTOs (§5) → service (§3 flows, §4.4 responsibility split) → controller (Swagger annotations).
 9. `SessionService` scaffold (built + unit-tested, unused by routes).
-10. Throttler (global guard + `@Throttle` overrides), CORS, compose Redis policy `volatile-lru`, env updates (§11).
+10. Throttler (global guard + `@Throttle` overrides), CORS, compose Redis policy `noeviction`, env updates (§11).
 11. Tests: normalizer decorators, `user.entity`, `user.factory` (mocked bcrypt — rounds, constructs from DTO, no re-normalization), `auth.service` (factory/repo/mail/queue mocked), `auth.controller`, `session.service` (mocked redis), `auth.repository` (entity in/out), `send-verification.processor` (send vs skip vs `UnrecoverableError`). Then `npm run lint`, `npm run typecheck`, `npm run test`.
 12. Manual smoke: curl register → confirm job processed (logs) → mail received (Mailpit as optional compose service, or a real SMTP catcher).
 

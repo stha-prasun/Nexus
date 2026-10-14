@@ -1,9 +1,10 @@
-import { pgTable, serial, text, timestamp, varchar } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 
 // `role` is validated against the auth module's ROLES constant at the API
 // boundary; the column stays a plain varchar (single column, no join table).
 export const users = pgTable('users', {
-  id: serial('id').primaryKey(),
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   email: varchar('email', { length: 255 }).notNull().unique(),
   name: varchar('name', { length: 100 }).notNull(),
   role: varchar('role', { length: 20 }).notNull().default('PM'),

@@ -195,3 +195,18 @@
   .ripple { opacity:0; }
   .lbl { fill:#5A6080; }
 }
+
+/* ===== Verified page (ported from verified.html) ===== */
+.v-disc, .v-ripple { transform-box:fill-box; transform-origin:center; }
+.v-disc { opacity:0; animation:popIn .6s cubic-bezier(.3,1.4,.5,1) .35s forwards; }
+.v-check { stroke-dasharray:1; stroke-dashoffset:1; animation:drawIn .45s ease-out .85s forwards; }
+.v-ripple { opacity:0; animation:vRipple 1.2s ease-out .9s forwards; }
+/* Flash fires when the page flips to the verified state (class on <main>), not on mount */
+.verified .graph .edges { animation:flash 1.5s ease-out .9s; }
+@keyframes vRipple { from { opacity:.6; transform:scale(1); } to { opacity:0; transform:scale(2); } }
+@keyframes flash { 35% { stroke:rgba(255,255,255,1); } }
+@media (prefers-reduced-motion: reduce) {
+  .v-disc { opacity:1; }
+  .v-check { stroke-dashoffset:0; }
+  .v-ripple { opacity:0; }
+}

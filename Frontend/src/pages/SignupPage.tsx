@@ -5,8 +5,30 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { ApiError, type Role, register } from '@/lib/api';
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: 'PM', label: 'Project Manager' },
+  { value: 'Dev', label: 'Developer' },
+  { value: 'Admin', label: 'Admin' },
+];
+
+const passwordPolicyOk = (value: string): boolean =>
+  value.length >= 8 &&
+  value.length <= 72 &&
+  /[a-z]/.test(value) &&
+  /[A-Z]/.test(value) &&
+  /\d/.test(value) &&
+  /[^A-Za-z0-9]/.test(value);
 
 const STRENGTH_LEVELS = [
   { text: '', color: '' },
@@ -27,11 +49,13 @@ const strengthScore = (value: string) => {
 };
 
 export function SignupPage() {
+  const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [graphActive, setGraphActive] = useState(false);
   const [strength, setStrength] = useState(0);
+  const [role, setRole] = useState<Role | ''>('');
 
   const panelRef = useRef<HTMLElement>(null);
   const fullnameRef = useRef<HTMLInputElement>(null);
@@ -63,7 +87,7 @@ export function SignupPage() {
     setStrength(strengthScore(event.target.value));
   };
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const name = fullnameRef.current?.value.trim() ?? '';
     const email = emailRef.current?.value.trim() ?? '';
@@ -75,8 +99,11 @@ export function SignupPage() {
       message = 'Tell us your name so teammates can find you.';
     } else if (!/^\S+@\S+\.\S+$/.test(email)) {
       message = 'Enter a valid email address, like name@company.com.';
-    } else if (password.length < 8) {
-      message = 'Your password needs at least 8 characters.';
+    } else if (!passwordPolicyOk(password)) {
+      message =
+        'Password needs 8+ characters with upper, lower, number and symbol.';
+    } else if (!role) {
+      message = 'Choose the role that fits you best.';
     } else if (!terms) {
       message = 'Please accept the Terms and Privacy Policy to continue.';
     }
@@ -85,10 +112,26 @@ export function SignupPage() {
       triggerShake();
       return;
     }
-    // Demo loading state: replace with your real signup call
+    // Validated above; guard keeps the narrowing for register() honest.
+    if (!role) return;
+
     setSubmitting(true);
-    console.log('Signup', { name, email });
-    window.setTimeout(() => setSubmitting(false), 1500);
+    try {
+      await register({ name, email, password, role });
+      navigate('/confirm-sent', { state: { email } });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429) {
+        setErrorMessage(
+          'Too many attempts — please wait a few minutes and try again.',
+        );
+      } else if (error instanceof ApiError) {
+        setErrorMessage(error.messages[0]);
+      } else {
+        setErrorMessage('Something went wrong. Please try again.');
+      }
+      triggerShake();
+      setSubmitting(false);
+    }
   };
 
   const level = STRENGTH_LEVELS[strength];
@@ -286,6 +329,43 @@ export function SignupPage() {
                   />
                 ))}
               </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="role"
+                className="mb-1.5 block text-sm font-semibold"
+              >
+                Role
+              </label>
+              <Select
+                value={role === '' ? undefined : role}
+                onValueChange={(value) => setRole(value as Role)}
+                disabled={submitting}
+              >
+                <SelectTrigger
+                  id="role"
+                  name="role"
+                  className="data-[size=default]:h-auto w-full rounded border border-ink-line bg-white px-3.5 text-[15px] text-ink outline-none transition focus:border-cobalt focus:ring-[3px] focus:ring-cobalt/20 focus-visible:border-cobalt focus-visible:ring-[3px] focus-visible:ring-cobalt/20 data-placeholder:text-ink-soft/60 [&_svg]:text-ink-soft"
+                >
+                  <SelectValue placeholder="Select your role" />
+                </SelectTrigger>
+                <SelectContent
+                  position="popper"
+                  align="start"
+                  className="min-w-(--radix-select-trigger-width) rounded border border-ink-line bg-white p-1 text-ink shadow-[0_18px_40px_-16px_rgba(10,15,80,.45)] ring-0"
+                >
+                  {ROLE_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      className="rounded py-2 pl-3.5 pr-8 text-[15px] text-ink focus:bg-mist focus:text-ink [&_svg]:text-cobalt"
+                    >
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink-soft">

@@ -61,15 +61,15 @@ services:
     image: redis:8-alpine
     container_name: nexus-redis
     restart: unless-stopped
-    # volatile-lru: bound memory but only evict keys WITH a TTL (sessions,
-    # verification tokens — recoverable). BullMQ queue keys are TTL-free and
-    # must never be evicted, so allkeys-lru is not safe here.
+    # noeviction: BullMQ requires it — with a memory ceiling, writes fail loudly
+    # instead of silently evicting queue keys (the QUEUE RUNS FROM REDIS).
+    # With no maxmemory pressure in dev this never triggers in practice.
     command:
       - redis-server
       - --maxmemory
       - 256mb
       - --maxmemory-policy
-      - volatile-lru
+      - noeviction
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -80,6 +80,19 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+  # Web UI for browsing Redis keys/queues: http://localhost:8081
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: nexus-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
 
   minio:
     image: minio/minio:latest

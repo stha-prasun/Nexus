@@ -41,7 +41,7 @@ export class SendVerificationProcessor {
     this.log = logger.child('mail:verify');
   }
 
-  async process(job: Job<{ userId: number }>): Promise<VerificationJobResult> {
+  async process(job: Job<{ userId: string }>): Promise<VerificationJobResult> {
     const { userId } = job.data;
 
     const token = await this.redis.get(verificationUserKey(userId));

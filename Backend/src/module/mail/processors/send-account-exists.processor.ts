@@ -30,7 +30,7 @@ export class SendAccountExistsProcessor {
     this.log = logger.child('mail:account-exists');
   }
 
-  async process(job: Job<{ userId: number }>): Promise<AccountExistsJobResult> {
+  async process(job: Job<{ userId: string }>): Promise<AccountExistsJobResult> {
     const { userId } = job.data;
 
     const rows = await this.db

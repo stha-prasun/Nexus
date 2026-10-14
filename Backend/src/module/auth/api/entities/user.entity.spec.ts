@@ -15,9 +15,9 @@ const buildUser = (
 
 describe('User', () => {
   it('exposes props via getters', () => {
-    const user = buildUser({ id: 7 });
+    const user = buildUser({ id: '00000000-0000-4000-8000-000000000007' });
 
-    expect(user.id).toBe(7);
+    expect(user.id).toBe('00000000-0000-4000-8000-000000000007');
     expect(user.name).toBe('Ada Lovelace');
     expect(user.email).toBe('ada@example.com');
     expect(user.role).toBe('Dev');

@@ -15,7 +15,7 @@ import {
 export class MailQueue {
   constructor(@Inject(MAIL_QUEUE) private readonly queue: Queue) {}
 
-  async enqueueVerification(userId: number): Promise<void> {
+  async enqueueVerification(userId: string): Promise<void> {
     await this.queue.add(
       JOB_SEND_VERIFICATION,
       { userId },
@@ -31,7 +31,7 @@ export class MailQueue {
     );
   }
 
-  async enqueueAccountExists(userId: number): Promise<void> {
+  async enqueueAccountExists(userId: string): Promise<void> {
     await this.queue.add(
       JOB_SEND_ACCOUNT_EXISTS,
       { userId },
