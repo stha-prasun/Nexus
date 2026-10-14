@@ -13,9 +13,10 @@
     --color-cobalt-dark: #1521b5;
     --color-ink: #14183a;
     --color-ink-soft: #5a6080;
-    --color-ink-line: #d5d9ec;
+    --color-ink-line: #cdd0e0;
     --color-sun: #ffd83d;
     --color-sun-dark: #f2c70f;
+    --color-paper: #f5f6fb;
     --color-mist: #eef0f8;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
@@ -209,4 +210,27 @@
   .v-disc { opacity:1; }
   .v-check { stroke-dashoffset:0; }
   .v-ripple { opacity:0; }
+}
+
+/* ===== Dashboard page (ported from dashboard.html) ===== */
+/* Sharp corners by default, mirroring the design's tailwind borderRadius config */
+.nx-dashboard button,
+.nx-dashboard input,
+.nx-dashboard select,
+.nx-dashboard dialog { border-radius: 0; }
+
+.dots { background-image: radial-gradient(rgba(255,255,255,.4) 1.6px, transparent 1.6px); background-size: 24px 24px; }
+.view-in { animation: dashRise .35s cubic-bezier(.2,.7,.2,1); }
+.anim .g-edge { stroke-dasharray: 1; stroke-dashoffset: 1; animation: drawIn .9s cubic-bezier(.3,.6,.2,1) var(--d) forwards; }
+.anim .g-node { opacity: 0; animation: pop .45s cubic-bezier(.3,1.5,.5,1) var(--d) forwards; }
+.g-node, .g-ring { transform-box: fill-box; transform-origin: center; }
+.g-ring { animation: sonar 3.6s ease-out 1.4s infinite; opacity: 0; }
+
+@keyframes dashRise { from { opacity: 0; transform: translateY(6px); } }
+@keyframes pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1); } }
+@keyframes sonar { 0% { opacity: .55; transform: scale(1); } 100% { opacity: 0; transform: scale(1.8); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-dashboard .anim .g-edge { stroke-dashoffset: 0; }
+  .nx-dashboard .anim .g-node { opacity: 1; }
 }

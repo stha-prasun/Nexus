@@ -1,8 +1,10 @@
 import { createBrowserRouter } from 'react-router';
 import { RootLayout } from '@/layouts/RootLayout';
 import { ConfirmSentPage } from '@/pages/ConfirmSentPage';
+import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
+import { ProfilePage } from '@/pages/ProfilePage';
 import { SignupPage } from '@/pages/SignupPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 
@@ -22,6 +24,14 @@ export const router = createBrowserRouter([
   {
     path: 'verify-email',
     Component: VerifyEmailPage,
+  },
+  {
+    path: 'dashboard',
+    Component: DashboardPage,
+  },
+  {
+    path: 'profile',
+    Component: ProfilePage,
   },
   {
     Component: RootLayout,
