@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { NestFactory } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { AppLogger } from './common/logger/logger';
 import { setupSwagger } from './common/swagger/setup-swagger';
@@ -10,6 +11,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, { logger });
   app.enableShutdownHooks();
   app.setGlobalPrefix('api/v1');
+  app.use(cookieParser());
   // Vite frontend (:5173 by default) calls the API cross-origin with cookies.
   app.enableCors({
     origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173')

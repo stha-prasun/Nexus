@@ -395,7 +395,7 @@ export function OrgView({
           </span>
         </h2>
         {projects.length > 0 || canManage ? (
-          <ul className="grid gap-px border border-ink bg-ink sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">
             {cells}
           </ul>
         ) : (

@@ -1,6 +1,6 @@
 # Login + Session — Implementation Plan
 
-**Status:** Approved for implementation (not yet implemented)
+**Status:** Implemented ✔ (see amendments below)
 **Scope:** `POST /auth/login`, `POST /auth/logout` (this device or all devices), `GET /auth/me` + full frontend wiring with a placeholder `/dashboard`
 **Target:** `Backend/src/module/auth/api` (existing folder), `Backend/src/main.ts`, plus `Frontend/src` wiring
 **Session backend:** existing Redis `SessionService` (already built/tested, currently unused by any route), extended with a per-user session index (sorted set)
@@ -281,15 +281,15 @@ LOGIN_LOCKOUT_WINDOW_SECONDS=900     # NEW
   | `me()` result | Redux | UI |
   |---|---|---|
   | `Ok` | `authenticated` + user | `/dashboard` renders |
-  | `Anonymous` | `anonymous` | `RequireAuth` redirects `/login` |
+      | `Anonymous` | `anonymous` | `RequireAuth` redirects `/` (the index login page) |
   | `Unreachable` | stays `unknown` + `bootstrapError` | `RequireAuth` shows *"Can't reach the server"* + **Retry** (re-runs `me()`) — never silently bounces a possibly-logged-in user to `/login` |
 
-- **`RequireAuth.tsx`:** `unknown`/`loading` → spinner; `unknown` + `bootstrapError` → retry UI; `anonymous` → `<Navigate to="/login" replace>`; `authenticated` → children. Wraps `/dashboard`.
+- **`RequireAuth.tsx`:** `unknown`/`loading` → spinner; `unknown` + `bootstrapError` → retry UI; `anonymous` → `<Navigate to="/" replace>` (the login page is the index route — there is no separate `/login` path); `authenticated` → children. Wraps `/dashboard`.
 - **Redirects off `/` and `/signup`:** fire **only on `status === 'authenticated'`** — never while status is still resolving (`unknown`). `/login` itself stays fully usable while status is `unknown` + `bootstrapError` (the retry affordance lives with `RequireAuth`, not on the login page — a fresh login is always a valid recovery path).
 - **`LoginPage.tsx`:** replace the stub at `:53-56` — call `login()`, dispatch `setUser`, `navigate('/dashboard')`; error mapping: `ApiError.status` 401 → show message; 403 `email_unverified` → `navigate('/confirm-sent', { state: { email } })` (reuses the existing page + resend cooldown); 429 → show server message; status 0 → network copy; `triggerShake()` on all failures. `remember` checkbox → payload.
 - **`DashboardPage.tsx`:** minimal placeholder (name/email/role from the slice) + **two explicit actions:**
   - *Log out* → `logout()` (this device only) → dispatch `setAnonymous` → navigate `/`
-  - *Log out everywhere* → `logout({ allDevices: true })` → if `revoked === 0`, treat as already logged out (same UX) → clear state → navigate `/login`
+  - *Log out everywhere* → `logout({ allDevices: true })` → if `revoked === 0`, treat as already logged out (same UX) → clear state → navigate `/` (owner preference over `/login`)
 - **`router.tsx`:** add `/dashboard` under `RequireAuth`; authenticated users hitting `/` or `/signup` redirect to `/dashboard` (only once status resolves).
 - Google button + "Forgot password?" stay dead (out of scope).
 
@@ -334,3 +334,12 @@ Gates: `npm run lint`, root `npm run typecheck`, Backend `npm test`. The fronten
 - Double-submit CSRF tokens.
 - Frontend unit tests (no runner installed).
 - Lua `EVAL` for atomic read+delete in revoke-all (only needed if interleaved `ZREM`s become a concern; index correctness doesn't require it).
+
+---
+
+## 13. Implementation amendments
+
+- **Dashboard (§2 / §9):** `DashboardPage.tsx` was no longer empty by implementation time — a static demo dashboard (AppShell, org/member views) landed after this plan was written. Per the owner's call, it was **kept** and wired instead of replaced: `/dashboard` + `/profile` sit under `RequireAuth`, the sidebar *Log out* is a real this-device logout, the profile page's *Log out everywhere* is a real `allDevices: true` revoke, and the shell shows the authenticated user's name/email. The per-device *Log out* in the demo session list stays stubbed (needs the session-list API, §12).
+- **Session helpers:** `indexOnLogin` / `unindexOnLogout` were folded into `SessionService.create` (MULTI write) and `destroyAndUnindex` rather than exposed as separate methods — one call site each, no value in splitting.
+- **429 exception:** Nest has no `TooManyRequestsException`; the lockout throws `HttpException(body, 429)` with the same `{ status: 'too_many_attempts' }` body.
+- **cookie-parser:** npm's latest is `1.4.7` (the plan's fallback); works fine on the Express 5 / Nest 11 line.

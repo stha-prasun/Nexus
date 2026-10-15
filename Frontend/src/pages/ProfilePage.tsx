@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { RoleBadge } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
+import { logout } from '@/lib/api';
 import type { DashboardState, Member, RoleKey } from '@/lib/dashboard';
 import {
   CURRENT_USER,
   createDemoState,
-  LOGOUT_ALL_STUB_TOAST,
-  LOGOUT_STUB_TOAST,
   pad2,
   ROLES,
   SESSION_LOGOUT_STUB_TOAST,
   SESSIONS,
 } from '@/lib/dashboard';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { setAnonymous } from '@/store/slices/authSlice';
 
 const signInTime = new Date();
 const sessionTime = (date: Date): string =>
@@ -36,14 +38,46 @@ function Detail({ label, value }: { label: string; value: React.ReactNode }) {
 export function ProfilePage() {
   const [state] = useState<DashboardState>(createDemoState);
   const { show, element: toastElement } = useToast();
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const authUser = useAppSelector((session) => session.auth.user);
 
   const { org, members, viewAs } = state;
   const user: Member = members[0] ?? { ...CURRENT_USER };
   const role: RoleKey = viewAs;
 
+  const displayName = authUser?.name ?? user.name;
+  const displayEmail = authUser?.email ?? user.email;
+
+  /** This device only — same action as the sidebar Log out. */
+  const handleLogout = (): void => {
+    void (async () => {
+      try {
+        await logout();
+      } catch {
+        // Best-effort server-side invalidation; the cookie still dies at TTL.
+      }
+      dispatch(setAnonymous());
+      navigate('/', { replace: true });
+    })();
+  };
+
+  /** Every session for this user; revoked === 0 just means "already out". */
+  const handleLogoutEverywhere = (): void => {
+    void (async () => {
+      try {
+        await logout({ allDevices: true });
+      } catch {
+        // Best-effort; a failed revoke dies at TTL and stays indexed.
+      }
+      dispatch(setAnonymous());
+      navigate('/', { replace: true });
+    })();
+  };
+
   useEffect(() => {
-    document.title = `${user.name} · Nexus`;
-  }, [user.name]);
+    document.title = `${displayName} · Nexus`;
+  }, [displayName]);
 
   const crumb = org ? (
     <>
@@ -59,12 +93,12 @@ export function ProfilePage() {
     <AppShell
       org={org}
       user={{
-        name: user.name,
-        email: user.email,
+        name: displayName,
+        email: displayEmail,
         roleLabel: org ? ROLES[role].label : 'No role yet',
       }}
       crumb={crumb}
-      onLogout={() => show(LOGOUT_STUB_TOAST)}
+      onLogout={handleLogout}
     >
       <div className="view-in">
         <h1 className="font-display text-3xl font-bold tracking-tight">
@@ -79,7 +113,7 @@ export function ProfilePage() {
           aria-labelledby="p-identity"
         >
           <span className="flex h-16 w-16 shrink-0 items-center justify-center bg-sun font-display text-xl font-bold text-ink">
-            {user.name
+            {displayName
               .trim()
               .split(/\s+/)
               .slice(0, 2)
@@ -92,9 +126,9 @@ export function ProfilePage() {
               id="p-identity"
               className="font-display text-2xl font-bold tracking-tight"
             >
-              {user.name}
+              {displayName}
             </h2>
-            <p className="truncate text-white/75">{user.email}</p>
+            <p className="truncate text-white/75">{displayEmail}</p>
             <div className="mt-2.5 flex flex-wrap items-center gap-3">
               <RoleBadge role={role} />
               <span className="text-sm text-white/75">
@@ -174,7 +208,7 @@ export function ProfilePage() {
               </p>
               <button
                 type="button"
-                onClick={() => show(LOGOUT_ALL_STUB_TOAST)}
+                onClick={handleLogoutEverywhere}
                 className="mt-4 w-full border border-red-600 px-4 py-2.5 text-sm font-semibold text-red-700 hover:bg-red-600 hover:text-white"
               >
                 Log out everywhere

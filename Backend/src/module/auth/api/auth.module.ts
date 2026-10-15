@@ -1,10 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { Module } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { DatabaseModule } from '../../database/database.module';
 import { MailModule } from '../../mail/mail.module';
 import { RedisModule } from '../../redis/redis.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { BCRYPT_ROUNDS } from './constants/auth.constants';
+import { BCRYPT_ROUNDS, DUMMY_HASH } from './constants/auth.constants';
 import { UserFactory } from './factories/user.factory';
 import { AuthRepository } from './repositories/auth.repository';
 import { SessionService } from './session/session.service';
@@ -17,6 +19,18 @@ const bcryptRoundsProvider = {
   },
 };
 
+/**
+ * Eager (not lazy) so the first unknown-email login isn't ~3× slower than a
+ * real one. Hex string in, never a Buffer. Same BCRYPT_ROUNDS source as
+ * register, so the cost always matches real hashes.
+ */
+const dummyHashProvider = {
+  provide: DUMMY_HASH,
+  useFactory: async (rounds: number): Promise<string> =>
+    bcrypt.hash(randomBytes(32).toString('hex'), rounds),
+  inject: [BCRYPT_ROUNDS],
+};
+
 @Module({
   imports: [DatabaseModule, RedisModule, MailModule],
   controllers: [AuthController],
@@ -26,6 +40,7 @@ const bcryptRoundsProvider = {
     UserFactory,
     SessionService,
     bcryptRoundsProvider,
+    dummyHashProvider,
   ],
 })
 export class AuthModule {}

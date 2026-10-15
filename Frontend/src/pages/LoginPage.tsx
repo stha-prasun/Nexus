@@ -1,8 +1,15 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, Navigate, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
+import { ApiError, login } from '@/lib/api';
+import { setPendingEmail } from '@/lib/resend';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { setUser } from '@/store/slices/authSlice';
 
 export function LoginPage() {
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const authStatus = useAppSelector((state) => state.auth.status);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -42,19 +49,43 @@ export function LoginPage() {
     let message = '';
     if (!/^\S+@\S+\.\S+$/.test(email)) {
       message = 'Enter a valid email address, like name@company.com.';
-    } else if (password.length < 8) {
-      message = 'Your password needs at least 8 characters.';
+    } else if (password.length < 1) {
+      message = 'Enter your password.';
     }
     setErrorMessage(message);
     if (message) {
       triggerShake();
       return;
     }
-    // Demo loading state: replace with your real auth call
+
     setSubmitting(true);
-    console.log('Submit', { email, remember });
-    window.setTimeout(() => setSubmitting(false), 1500);
+    void (async () => {
+      try {
+        const { user } = await login({ email, password, remember });
+        dispatch(setUser(user));
+        navigate('/dashboard', { replace: true });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) {
+          // Correct password, unverified account — resend flow takes over.
+          setPendingEmail(email);
+          navigate('/confirm-sent', { state: { email } });
+          return;
+        }
+        setErrorMessage(
+          error instanceof ApiError
+            ? error.messages.join(' ')
+            : 'Something went wrong. Please try again.',
+        );
+        setSubmitting(false);
+        triggerShake();
+      }
+    })();
   };
+
+  // Already signed in (session restored on load, or login just succeeded).
+  if (authStatus === 'authenticated') {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <main className="canvas relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-4 font-sans text-ink antialiased">

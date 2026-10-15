@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router';
+import { RequireAuth } from '@/components/auth/RequireAuth';
 import { RootLayout } from '@/layouts/RootLayout';
 import { ConfirmSentPage } from '@/pages/ConfirmSentPage';
 import { DashboardPage } from '@/pages/DashboardPage';
@@ -27,11 +28,19 @@ export const router = createBrowserRouter([
   },
   {
     path: 'dashboard',
-    Component: DashboardPage,
+    element: (
+      <RequireAuth>
+        <DashboardPage />
+      </RequireAuth>
+    ),
   },
   {
     path: 'profile',
-    Component: ProfilePage,
+    element: (
+      <RequireAuth>
+        <ProfilePage />
+      </RequireAuth>
+    ),
   },
   {
     Component: RootLayout,

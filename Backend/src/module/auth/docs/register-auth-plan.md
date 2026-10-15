@@ -421,7 +421,7 @@ SESSION_COOKIE_SAME_SITE=lax
 
 ## 13. Explicitly out of scope (follow-ups)
 
-- `login` / `logout` / `me` endpoints (SessionService is ready for them).
+- ~~`login` / `logout` / `me` endpoints~~ — implemented per `login-auth-plan.md`.
 - Frontend wiring: `SignupPage` → `POST /auth/register`, `/verify-email` SPA page, password-policy client-side update.
 - Rate-limit tuning, admin role restriction, `Idempotency-Key` header.
 - Separate worker process, queue dashboard, non-verification mail templates.

@@ -86,7 +86,7 @@ describe('AuthRepository', () => {
     const user = await repository.findByEmail('ada@example.com');
 
     expect(user).toBeInstanceOf(User);
-    expect(user?.id).toBe(1);
+    expect(user?.id).toBe(uuid1);
     expect(user?.name).toBe('Ada Lovelace');
     expect(user?.email).toBe('ada@example.com');
     expect(user?.role).toBe('Dev');

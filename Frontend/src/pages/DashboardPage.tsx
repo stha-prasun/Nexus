@@ -1,19 +1,22 @@
 import { type ReactNode, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
 import { OrgView, RoleSelect } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
+import { logout } from '@/lib/api';
 import type { DashboardState, Member, Org, RoleKey } from '@/lib/dashboard';
 import {
   CURRENT_USER,
   createDemoState,
   EMAIL_PATTERN,
   INPUT,
-  LOGOUT_STUB_TOAST,
   ROLES,
   SLUG_PATTERN,
 } from '@/lib/dashboard';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { setAnonymous } from '@/store/slices/authSlice';
 
 function Field({
   htmlFor,
@@ -39,6 +42,22 @@ export function DashboardPage() {
   const [viewKey, setViewKey] = useState(0);
   const { show, element: toastElement } = useToast();
   const { ask, element: dialogElement } = useDialog();
+  const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const authUser = useAppSelector((session) => session.auth.user);
+
+  /** This device only — "log out everywhere" lives on the profile page. */
+  const handleLogout = (): void => {
+    void (async () => {
+      try {
+        await logout();
+      } catch {
+        // Best-effort server-side invalidation; the cookie still dies at TTL.
+      }
+      dispatch(setAnonymous());
+      navigate('/', { replace: true });
+    })();
+  };
 
   const { org, members, projects, viewAs } = state;
   const canManage = viewAs === 'pm';
@@ -261,12 +280,12 @@ export function DashboardPage() {
     <AppShell
       org={org}
       user={{
-        name: members[0]?.name ?? CURRENT_USER.name,
-        email: members[0]?.email ?? CURRENT_USER.email,
+        name: authUser?.name ?? members[0]?.name ?? CURRENT_USER.name,
+        email: authUser?.email ?? members[0]?.email ?? CURRENT_USER.email,
         roleLabel: org ? ROLES[viewAs].label : 'No role yet',
       }}
       crumb={crumb}
-      onLogout={() => show(LOGOUT_STUB_TOAST)}
+      onLogout={handleLogout}
     >
       <div key={org ? `org-${viewKey}` : 'empty'} className="view-in">
         {org ? (

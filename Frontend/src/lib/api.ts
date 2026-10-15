@@ -73,6 +73,87 @@ export function register(payload: RegisterPayload): Promise<RegisterResponse> {
   return apiPost<RegisterResponse>('/auth/register', payload);
 }
 
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+}
+
+export interface LoginPayload {
+  email: string;
+  password: string;
+  remember?: boolean;
+}
+
+export interface LoginResponse {
+  user: User;
+}
+
+/** Sets the httpOnly `nexus_sid` cookie (24h, 7d when remember is true). */
+export function login(payload: LoginPayload): Promise<LoginResponse> {
+  return apiPost<LoginResponse>('/auth/login', payload);
+}
+
+export interface LogoutResponse {
+  message: string;
+  /** Live sessions actually destroyed — 0 also means "already logged out". */
+  revoked: number;
+}
+
+/** This device by default; `{ allDevices: true }` revokes every session. */
+export function logout(
+  options: { allDevices?: boolean } = {},
+): Promise<LogoutResponse> {
+  return apiPost<LogoutResponse>('/auth/logout', options);
+}
+
+/**
+ * Three-way session probe for bootstrap:
+ * - `ok`        — 200, the server vouched for the cookie;
+ * - `anonymous` — 401, definitive: the session is gone;
+ * - `unreachable` — network error, 5xx or timeout: NOT a verdict on the
+ *   session, so the client must not sign the user out.
+ */
+export type MeResult =
+  | { kind: 'ok'; user: User }
+  | { kind: 'anonymous' }
+  | { kind: 'unreachable' };
+
+/** A hung /me must never leave an infinite spinner. */
+const ME_TIMEOUT_MS = 8000;
+
+export async function me(): Promise<MeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ME_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`${BASE_URL}/auth/me`, {
+      credentials: 'include',
+      signal: controller.signal,
+    });
+  } catch {
+    // Network failure or our own abort — both are "unreachable".
+    return { kind: 'unreachable' };
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (response.ok) {
+    try {
+      const body = (await response.json()) as { user?: User };
+      if (body.user) return { kind: 'ok', user: body.user };
+    } catch {
+      // Non-JSON 200 — treat as unreachable rather than invent a verdict.
+    }
+    return { kind: 'unreachable' };
+  }
+  return response.status === 401
+    ? { kind: 'anonymous' }
+    : { kind: 'unreachable' };
+}
+
 export interface ResendConfirmationResponse {
   message: string;
 }

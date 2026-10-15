@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, Navigate, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
 import {
   Select,
@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { ApiError, type Role, register } from '@/lib/api';
 import { setPendingEmail, startCooldown } from '@/lib/resend';
+import { useAppSelector } from '@/store/hooks';
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'PM', label: 'Project Manager' },
@@ -51,6 +52,7 @@ const strengthScore = (value: string) => {
 
 export function SignupPage() {
   const navigate = useNavigate();
+  const authStatus = useAppSelector((state) => state.auth.status);
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -140,6 +142,11 @@ export function SignupPage() {
   };
 
   const level = STRENGTH_LEVELS[strength];
+
+  // Already signed in — no need for a signup form.
+  if (authStatus === 'authenticated') {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   return (
     <main className="canvas relative flex min-h-[100dvh] items-center justify-center overflow-hidden px-4 py-4 font-sans text-ink antialiased">

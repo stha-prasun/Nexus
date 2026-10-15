@@ -111,10 +111,7 @@ export const BTN =
 export const BTN_LINE =
   'border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white';
 
-export const LOGOUT_STUB_TOAST =
-  'Log out connects with the auth API — coming in the auth pass.';
-export const LOGOUT_ALL_STUB_TOAST =
-  'Log out everywhere connects with the auth API — coming in the auth pass.';
+/** Stub copy for logging out ANOTHER device — needs the session-list API. */
 export const SESSION_LOGOUT_STUB_TOAST =
   'Logging out that device connects with the auth API — coming in the auth pass.';
 
