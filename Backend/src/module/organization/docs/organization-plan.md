@@ -27,12 +27,12 @@ slug            varchar(63) not null            // matches DTO bounds (3–63)
 singleton       boolean not null default true   // UNIQUE + CHECK (singleton = true)
 createdByUserId uuid not null → users.id (FK, restrict)
 createdAt       timestamptz not null defaultNow()
-updatedAt       timestamptz not null defaultNow()
+updatedAt       timestamptz not null defaultNow()  // + $onUpdate(() => new Date()) — stamped by Drizzle on every UPDATE
 ```
 
 - **Singleton enforcement lives in the DB, not only in app code.** The column carries both `UNIQUE` and `CHECK (singleton = true)` (Drizzle `check()` in the table config). The CHECK closes the `false`-row bypass — without it, one `true` row plus unlimited `false` rows would slip through; with it, every row must be `true`, and the UNIQUE then makes a second row impossible, even under concurrent requests. The repository catches Postgres error `23505` (unique violation) and maps it to `409 organization_exists`. No advisory locks needed.
 - Index on `createdByUserId` — cheap, and ready for the future members feature.
-- Migration: `npm run db:generate` produces `drizzle/0003_*.sql`; apply with `npm run db:migrate` against `POSTGRES_HOST_PORT` (never PgBouncer — transaction mode is unsafe for DDL).
+- Migration: `npm run db:generate` produces `drizzle/0003_*.sql`; apply with `npm run db:migrate` against `POSTGRES_HOST_PORT` (never PgBouncer — transaction mode is unsafe for DDL). **Implemented:** `drizzle/0003_chubby_supreme_intelligence.sql`, applied.
 
 ## 3. Files — new / rewritten
 
@@ -91,7 +91,7 @@ Implemented via a small policy consulted by the service, plus a role guard for t
 - **Residual risk (accepted)**: if the creator is gone and no Admin account exists, the org is unmodifiable until an Admin exists.
 - Dev → **403** `pm_required` on create/update/delete; non-owner PM → **403** `not_organization_owner` on update/delete; both can still `GET`.
 
-`organization.policy.ts` exposes `canManage(actor: SessionUser, org: Organization): boolean` — true for `role === 'Admin'`, true for a PM only when `actor.userId === org.createdByUserId`, false otherwise. `RolesGuard` (in `common/guards`, Reflector-based, reading `@Roles(...)`) enforces the role attribute on mutating routes; ownership is checked in the service after the single load, so the org row is never fetched twice.
+`organization.policy.ts` exposes `canManage(actor: SessionUser, org: Organization): boolean` — true for `role === 'Admin'`, true for a PM only when `actor.userId === org.createdByUserId`, false otherwise. `RolesGuard` (in `common/guards`, Reflector-based, reading `@Roles(...)`) enforces the role attribute on mutating routes; ownership is checked in the service after the single load, so the org row is never fetched twice. The guard's 403 body is `pm_required`, imported from `organization.constants.ts` — every `@Roles` consumer today is PM-gated, so the vocabulary lives with its first consumer (a static constant import, no DI coupling); a future non-PM-gated route would give the guard a per-route error override. The service also defends create with the same `pm_required` check (`Admin create → 403` stays true below the guard).
 
 `SessionAuthGuard` (in `auth/api/guards`): reads the `nexus_sid` cookie → `SessionService.get(sid)` → attaches `SessionUser` to `req.user`; missing/corrupt/expired session → **401** with `UNAUTHENTICATED_MESSAGE`. Applied on the organization controller only — not registered globally yet (the auth plan explicitly deferred a global guard; this stays scoped).
 
@@ -111,7 +111,7 @@ Injectable provider, registered in the organization module. The repository keeps
 - `name`: `@Trim @IsString @MinLength(2) @MaxLength(100)`
 - `slug`: `@Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)` — same as the frontend `SLUG_PATTERN`, `@MinLength(3) @MaxLength(63)`, lowercase via transform. The schema column is `varchar(63)`, so DB and DTO bounds agree — no path exists for a >63-char slug to reach the database
 - `PATCH`: same rules with everything `@IsOptional()`
-- Empty PATCH after whitelist stripping: class-validator cannot express "at least one field" — the service checks `Object.keys(dto).length === 0` → 400 `empty_update`
+- Empty PATCH after whitelist stripping: class-validator cannot express "at least one field" — the service checks that no field carries a value → 400 `empty_update`. **Implemented as** `dto.name === undefined && dto.slug === undefined` rather than `Object.keys(dto).length === 0`: TS `useDefineForClassFields` (target ES2023) keeps absent optional properties as own `undefined` keys, so the key count is never 0.
 - Unknown body fields are stripped by the global `ValidationPipe({ whitelist: true })`
 
 ## 8. Edge cases
@@ -158,6 +158,7 @@ Injectable provider, registered in the organization module. The repository keeps
 - `organization.service.spec.ts` — create success, 409 conflict mapping, owner-PM allowed, non-owner PM 403, Admin update/delete allowed regardless of ownership, Admin create → 403, 404 paths, empty-update 400, factory wiring (mock repository + policy).
 - `organization.controller.spec.ts` — guard composition and status codes (mock service).
 - Commands (from `Backend/`): `npm test`, `npm run typecheck`, `npm run lint`. Fixing the `app.module.ts` import also makes the repo typecheck again (lefthook hooks currently fail on it).
+- **Implemented note:** the service spec mocks the repository only — the real factory and policy are wired in, so slug normalization/`createdByUserId` wiring and the full ABAC matrix are exercised end-to-end through the service; the controller spec covers guard/roles/throttle/204 metadata plus DTO mapping with a mocked `SessionService` (Nest instantiates `@UseGuards` classes on the controller). All three commands pass: 205 tests / 23 suites, typecheck clean, biome clean.
 
 ## 12. Implementation order
 

@@ -8,6 +8,7 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { BCRYPT_ROUNDS, DUMMY_HASH } from './constants/auth.constants';
 import { UserFactory } from './factories/user.factory';
+import { SessionAuthGuard } from './guards/session-auth.guard';
 import { AuthRepository } from './repositories/auth.repository';
 import { SessionService } from './session/session.service';
 
@@ -39,8 +40,12 @@ const dummyHashProvider = {
     AuthRepository,
     UserFactory,
     SessionService,
+    SessionAuthGuard,
     bcryptRoundsProvider,
     dummyHashProvider,
   ],
+  // SessionAuthGuard is only applied where @UseGuards is used (organization
+  // routes today) — a global auth guard stays deferred per the auth plan.
+  exports: [SessionService, SessionAuthGuard],
 })
 export class AuthModule {}
