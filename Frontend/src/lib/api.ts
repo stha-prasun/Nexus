@@ -47,14 +47,22 @@ const parseError = async (response: Response): Promise<ApiError> => {
   return new ApiError(response.status, messages);
 };
 
-async function apiPost<T>(path: string, body: unknown): Promise<T> {
+async function apiRequest<T>(
+  path: string,
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
+  body?: unknown,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${BASE_URL}${path}`, {
-      method: 'POST',
+      method,
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      ...(body === undefined
+        ? {}
+        : {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }),
     });
   } catch {
     // fetch rejects on network failure — surface as status 0.
@@ -66,7 +74,14 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   if (!response.ok) {
     throw await parseError(response);
   }
-  return (await response.json()) as T;
+  // 204 No Content (DELETE) has no body to parse.
+  const text = await response.text();
+  if (text === '') return undefined as unknown as T;
+  return JSON.parse(text) as T;
+}
+
+async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return apiRequest<T>(path, 'POST', body);
 }
 
 export function register(payload: RegisterPayload): Promise<RegisterResponse> {
@@ -207,4 +222,46 @@ export async function verifyEmail(token: string): Promise<VerifyEmailResponse> {
   throw new ApiError(response.status, [
     'Something went wrong. Please try again.',
   ]);
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  /** User id of the PM who created the organization (its owner). */
+  createdByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The singleton organization, or null when none exists yet — null is a
+ * valid answer (200), not an error. Same `{status, message}` error bodies
+ * as auth for 401/403/404/409, surfaced through ApiError.
+ */
+export async function getOrganization(): Promise<Organization | null> {
+  const body = await apiRequest<{ organization: Organization | null }>(
+    '/organization',
+    'GET',
+  );
+  return body.organization;
+}
+
+export function createOrganization(payload: {
+  name: string;
+  slug: string;
+}): Promise<Organization> {
+  return apiRequest<Organization>('/organization', 'POST', payload);
+}
+
+export function updateOrganization(payload: {
+  name?: string;
+  slug?: string;
+}): Promise<Organization> {
+  return apiRequest<Organization>('/organization', 'PATCH', payload);
+}
+
+/** 204 No Content — resolves once the singleton row is gone. */
+export function deleteOrganization(): Promise<void> {
+  return apiRequest<void>('/organization', 'DELETE');
 }

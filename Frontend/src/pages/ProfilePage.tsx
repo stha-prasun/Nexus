@@ -12,9 +12,11 @@ import {
   ROLES,
   SESSION_LOGOUT_STUB_TOAST,
   SESSIONS,
+  toRoleKey,
 } from '@/lib/dashboard';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
+import { clearOrg } from '@/store/slices/orgSlice';
 
 const signInTime = new Date();
 const sessionTime = (date: Date): string =>
@@ -41,10 +43,11 @@ export function ProfilePage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const authUser = useAppSelector((session) => session.auth.user);
+  const { org } = useOrganization();
 
-  const { org, members, viewAs } = state;
+  const { members, viewAs } = state;
   const user: Member = members[0] ?? { ...CURRENT_USER };
-  const role: RoleKey = viewAs;
+  const role: RoleKey = authUser ? toRoleKey(authUser.role) : viewAs;
 
   const displayName = authUser?.name ?? user.name;
   const displayEmail = authUser?.email ?? user.email;
@@ -57,6 +60,7 @@ export function ProfilePage() {
       } catch {
         // Best-effort server-side invalidation; the cookie still dies at TTL.
       }
+      dispatch(clearOrg());
       dispatch(setAnonymous());
       navigate('/', { replace: true });
     })();
@@ -70,6 +74,7 @@ export function ProfilePage() {
       } catch {
         // Best-effort; a failed revoke dies at TTL and stays indexed.
       }
+      dispatch(clearOrg());
       dispatch(setAnonymous());
       navigate('/', { replace: true });
     })();
@@ -95,7 +100,7 @@ export function ProfilePage() {
       user={{
         name: displayName,
         email: displayEmail,
-        roleLabel: org ? ROLES[role].label : 'No role yet',
+        roleLabel: ROLES[role].label,
       }}
       crumb={crumb}
       onLogout={handleLogout}

@@ -1,4 +1,9 @@
+import type { Role } from '@/lib/api';
+
 export type RoleKey = 'pm' | 'admin' | 'dev';
+
+/** Sign-up role from the auth store ('PM' | 'Dev' | 'Admin') → dashboard key. */
+export const toRoleKey = (role: Role): RoleKey => role.toLowerCase() as RoleKey;
 
 export const ROLES: Record<
   RoleKey,
@@ -53,14 +58,16 @@ export const CURRENT_USER: Member = {
 
 export interface DashboardState {
   viewAs: RoleKey;
-  org: Org | null;
   members: Member[];
   projects: Project[];
 }
 
+/**
+ * Demo team data — members/projects have no backend yet. The real
+ * organization lives in the Redux `org` slice (fetched from the API).
+ */
 export const createDemoState = (): DashboardState => ({
   viewAs: 'pm',
-  org: { name: 'Acme Design', slug: 'acme-design' },
   members: [
     { ...CURRENT_USER },
     { name: 'Jonas Weber', email: 'jonas@acme.com', role: 'admin' },

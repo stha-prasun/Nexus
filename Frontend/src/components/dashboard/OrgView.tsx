@@ -53,6 +53,11 @@ export function RoleBadge({ role }: { role: RoleKey }) {
  * role chip + chevron, opening a styled option list (badges, descriptions,
  * checkmark). Keeps its own selection so it works inside dialogs (FormData
  * reads the hidden input) and reports changes via onChange.
+ *
+ * The list is full trigger width (min 16rem). Inside a <dialog> it opens
+ * toward the roomier side and is capped to that space, so it never pushes
+ * past the dialog's `overflow-y-auto` box — that used to spawn a scrollbar
+ * in the dialog while covering only part of the field.
  */
 export function RoleSelect({
   value,
@@ -71,7 +76,11 @@ export function RoleSelect({
 }) {
   const [selected, setSelected] = useState<RoleKey>(value);
   const [open, setOpen] = useState(false);
+  const [menuBox, setMenuBox] = useState<{ up: boolean; maxHeight?: number }>({
+    up: false,
+  });
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => setSelected(value), [value]);
 
@@ -102,12 +111,33 @@ export function RoleSelect({
     setOpen(false);
   };
 
+  const toggleOpen = (): void => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const trigger = triggerRef.current;
+    const dialog = trigger?.closest('dialog');
+    if (trigger && dialog) {
+      const t = trigger.getBoundingClientRect();
+      const d = dialog.getBoundingClientRect();
+      const above = t.top - d.top - 8;
+      const below = d.bottom - t.bottom - 8;
+      const up = above >= below;
+      setMenuBox({ up, maxHeight: Math.max(96, up ? above : below) });
+    } else {
+      setMenuBox({ up: false });
+    }
+    setOpen(true);
+  };
+
   return (
     <div className={className}>
       <div ref={containerRef} className="relative flex">
         <button
+          ref={triggerRef}
           type="button"
-          onClick={() => setOpen((value_) => !value_)}
+          onClick={toggleOpen}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={ariaLabel}
@@ -133,7 +163,14 @@ export function RoleSelect({
           <div
             role="listbox"
             aria-label={ariaLabel}
-            className="absolute left-0 top-[calc(100%+4px)] z-30 w-64 border border-ink bg-white shadow-[6px_6px_0_#14183A]"
+            style={
+              menuBox.maxHeight === undefined
+                ? undefined
+                : { maxHeight: menuBox.maxHeight }
+            }
+            className={`absolute left-0 z-30 w-full min-w-64 overflow-y-auto border border-ink bg-white shadow-[6px_6px_0_#14183A] ${
+              menuBox.up ? 'bottom-[calc(100%+4px)]' : 'top-[calc(100%+4px)]'
+            }`}
           >
             {ROLE_ORDER.map((key) => (
               <button

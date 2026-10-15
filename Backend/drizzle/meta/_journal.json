@@ -29,6 +29,13 @@
       "when": 1792060707488,
       "tag": "0003_chubby_supreme_intelligence",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792078488245,
+      "tag": "0004_woozy_shocker",
+      "breakpoints": true
     }
   ]
 }

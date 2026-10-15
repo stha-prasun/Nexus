@@ -5,7 +5,13 @@ import { AppShell } from '@/components/dashboard/AppShell';
 import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
 import { OrgView, RoleSelect } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
-import { logout } from '@/lib/api';
+import {
+  ApiError,
+  createOrganization,
+  deleteOrganization,
+  logout,
+  updateOrganization,
+} from '@/lib/api';
 import type { DashboardState, Member, Org, RoleKey } from '@/lib/dashboard';
 import {
   CURRENT_USER,
@@ -14,9 +20,11 @@ import {
   INPUT,
   ROLES,
   SLUG_PATTERN,
+  toRoleKey,
 } from '@/lib/dashboard';
-import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
+import { clearOrg, removeOrg, setOrg } from '@/store/slices/orgSlice';
 
 function Field({
   htmlFor,
@@ -45,6 +53,12 @@ export function DashboardPage() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const authUser = useAppSelector((session) => session.auth.user);
+  const {
+    org,
+    status: orgStatus,
+    error: orgError,
+    retry: retryOrg,
+  } = useOrganization();
 
   /** This device only — "log out everywhere" lives on the profile page. */
   const handleLogout = (): void => {
@@ -54,12 +68,13 @@ export function DashboardPage() {
       } catch {
         // Best-effort server-side invalidation; the cookie still dies at TTL.
       }
+      dispatch(clearOrg());
       dispatch(setAnonymous());
       navigate('/', { replace: true });
     })();
   };
 
-  const { org, members, projects, viewAs } = state;
+  const { members, projects, viewAs } = state;
   const canManage = viewAs === 'pm';
 
   useEffect(() => {
@@ -204,8 +219,21 @@ export function DashboardPage() {
     if (!result) return;
     const name = String(result.get('name') ?? '').trim();
     const slug = String(result.get('slug') ?? '');
-    setState((current) => ({ ...current, org: { name, slug } }));
-    show('Organization updated');
+    try {
+      const updated = await updateOrganization({ name, slug });
+      dispatch(setOrg(updated));
+      show('Organization updated');
+    } catch (error) {
+      // 404 = deleted in another tab — fall back to the empty state.
+      if (error instanceof ApiError && error.status === 404) {
+        dispatch(removeOrg());
+      }
+      show(
+        error instanceof ApiError
+          ? error.messages.join(' ')
+          : 'Something went wrong. Please try again.',
+      );
+    }
   };
 
   const handleDeleteOrg = async (): Promise<void> => {
@@ -245,21 +273,43 @@ export function DashboardPage() {
           : "The name doesn't match.",
     });
     if (!result) return;
+    try {
+      await deleteOrganization();
+    } catch (error) {
+      // Already gone elsewhere — treat as deleted so the UI converges.
+      if (!(error instanceof ApiError && error.status === 404)) {
+        show(
+          error instanceof ApiError
+            ? error.messages.join(' ')
+            : 'Something went wrong. Please try again.',
+        );
+        return;
+      }
+    }
+    dispatch(removeOrg());
     setState((current) => ({
       ...current,
-      org: null,
       members: current.members.slice(0, 1),
       projects: [],
     }));
     show('Organization deleted');
   };
 
-  const handleCreateOrg = (created: Org): void => {
+  /**
+   * POSTs the real singleton; ApiError propagates so EmptyOrgView can show
+   * it inline (409 race, 403 pm_required, 429 throttle, 400 validation).
+   */
+  const handleCreateOrg = async (created: Org): Promise<void> => {
+    const organization = await createOrganization(created);
+    dispatch(setOrg(organization));
     setState((current) => ({
       ...current,
-      org: created,
       viewAs: 'pm',
-      members: [{ ...current.members[0], role: 'pm' } as Member],
+      members: [
+        authUser
+          ? { name: authUser.name, email: authUser.email, role: 'pm' }
+          : { ...(current.members[0] ?? { ...CURRENT_USER }), role: 'pm' },
+      ],
       projects: [],
     }));
     bumpGraph();
@@ -282,13 +332,44 @@ export function DashboardPage() {
       user={{
         name: authUser?.name ?? members[0]?.name ?? CURRENT_USER.name,
         email: authUser?.email ?? members[0]?.email ?? CURRENT_USER.email,
-        roleLabel: org ? ROLES[viewAs].label : 'No role yet',
+        roleLabel: authUser
+          ? ROLES[toRoleKey(authUser.role)].label
+          : 'No role yet',
       }}
       crumb={crumb}
       onLogout={handleLogout}
     >
-      <div key={org ? `org-${viewKey}` : 'empty'} className="view-in">
-        {org ? (
+      {/* The empty state carries its own staggered `.rise` entrance (per the
+          design), so `view-in` only wraps the org view. */}
+      <div
+        key={org ? `org-${viewKey}` : 'empty'}
+        className={org ? 'view-in' : undefined}
+      >
+        {orgStatus === 'unknown' || orgStatus === 'loading' ? (
+          <div
+            role="status"
+            aria-label="Loading organization"
+            className="flex justify-center py-24"
+          >
+            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
+          </div>
+        ) : orgStatus === 'error' ? (
+          <div className="flex flex-col items-center gap-4 py-24 text-center">
+            <p className="text-[15px] font-semibold text-ink">
+              Couldn&apos;t load your organization.
+            </p>
+            <p className="max-w-sm text-sm text-ink-soft">
+              {orgError.join(' ')}
+            </p>
+            <button
+              type="button"
+              onClick={retryOrg}
+              className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt focus-visible:ring-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : org ? (
           <OrgView
             org={org}
             members={members}

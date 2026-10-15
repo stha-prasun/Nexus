@@ -221,6 +221,8 @@
 
 .dots { background-image: radial-gradient(rgba(255,255,255,.4) 1.6px, transparent 1.6px); background-size: 24px 24px; }
 .view-in { animation: dashRise .35s cubic-bezier(.2,.7,.2,1); }
+/* Staggered entrance from the design: delay = --i * .08s */
+.rise { animation: rise .6s cubic-bezier(.2,.7,.2,1) backwards; animation-delay: calc(var(--i, 0) * .08s); }
 .anim .g-edge { stroke-dasharray: 1; stroke-dashoffset: 1; animation: drawIn .9s cubic-bezier(.3,.6,.2,1) var(--d) forwards; }
 .anim .g-node { opacity: 0; animation: pop .45s cubic-bezier(.3,1.5,.5,1) var(--d) forwards; }
 .g-node, .g-ring { transform-box: fill-box; transform-origin: center; }

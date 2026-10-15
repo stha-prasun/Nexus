@@ -95,6 +95,23 @@ export function WarningIcon({ className }: { className?: string }) {
   );
 }
 
+/** Padlock for nav items that need an organization first. */
+export function LockIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className ?? 'h-3.5 w-3.5'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="square"
+      aria-hidden="true"
+    >
+      <path d="M6 11h12v9H6zM9 11V7a3 3 0 016 0v4" />
+    </svg>
+  );
+}
+
 export function NexusLogo({ className }: { className?: string }) {
   return (
     <svg
