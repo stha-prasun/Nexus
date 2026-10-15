@@ -7,7 +7,7 @@ Backend-only plan for the organization feature. Frontend and the members feature
 | Decision | Answer |
 |---|---|
 | Scope | System-wide **singleton** — only one organization may exist; create is rejected (409) until it is deleted |
-| Mutate permission | **PM role AND creator**: `role === 'PM' && actor.userId === org.createdByUserId` |
+| Mutate permission | **Owner PM, plus Admin break-glass**: `update/delete = (role === 'PM' && actor.userId === org.createdByUserId) || role === 'Admin'` — the Admin fallback prevents lock-out if the creator's account is deleted or demoted. Create remains PM-only |
 | View permission | Any authenticated user (valid session cookie) |
 | Fields | `name` + `slug` only (plus system columns) |
 | Delete | Hard delete |
@@ -23,14 +23,14 @@ New Drizzle table in `Backend/src/module/database/schema/organizations.ts`, expo
 ```ts
 id              uuid PK default gen_random_uuid()
 name            varchar(100) not null
-slug            varchar(100) not null
-singleton       boolean not null default true   // UNIQUE — DB-level singleton guarantee
+slug            varchar(63) not null            // matches DTO bounds (3–63)
+singleton       boolean not null default true   // UNIQUE + CHECK (singleton = true)
 createdByUserId uuid not null → users.id (FK, restrict)
 createdAt       timestamptz not null defaultNow()
 updatedAt       timestamptz not null defaultNow()
 ```
 
-- **Singleton enforcement lives in the DB, not only in app code.** The `UNIQUE` constraint on `singleton` (always `true`) makes a second row impossible, even under concurrent requests. The repository catches Postgres error `23505` (unique violation) and maps it to `409 organization_exists`. No advisory locks needed.
+- **Singleton enforcement lives in the DB, not only in app code.** The column carries both `UNIQUE` and `CHECK (singleton = true)` (Drizzle `check()` in the table config). The CHECK closes the `false`-row bypass — without it, one `true` row plus unlimited `false` rows would slip through; with it, every row must be `true`, and the UNIQUE then makes a second row impossible, even under concurrent requests. The repository catches Postgres error `23505` (unique violation) and maps it to `409 organization_exists`. No advisory locks needed.
 - Index on `createdByUserId` — cheap, and ready for the future members feature.
 - Migration: `npm run db:generate` produces `drizzle/0003_*.sql`; apply with `npm run db:migrate` against `POSTGRES_HOST_PORT` (never PgBouncer — transaction mode is unsafe for DDL).
 
@@ -75,8 +75,10 @@ Routes live under the global prefix at `/api/v1/organization`. No `:id` — the 
 |---|---|---|
 | `POST /organization` | SessionAuthGuard → RolesGuard(`PM`) + `@Throttle(5/10min)` | Factory builds the entity → repository insert. **201** + `OrganizationResponseDto`. **409** `{ status: 'organization_exists' }` if a row already exists (also via `23505` catch for races) |
 | `GET /organization` | SessionAuthGuard only | **200** `{ organization: OrganizationResponseDto \| null }` — a null body, not a 404, so the frontend can branch without error-driven UX (mirrors the `/auth/me` style) |
-| `PATCH /organization` | SessionAuthGuard → RolesGuard(`PM`) | Load org (**404** `organization_not_found`) → policy `canManage` (**403** `not_organization_owner`) → **400** `empty_update` if no fields provided → update. **200** + DTO |
-| `DELETE /organization` | SessionAuthGuard → RolesGuard(`PM`) | Same load + policy checks → hard delete → **204** No Content |
+| `PATCH /organization` | SessionAuthGuard → RolesGuard(`PM`, `Admin`) | Load org (**404** `organization_not_found`) → policy `canManage` (**403** `not_organization_owner` for a non-owner PM) → **400** `empty_update` if no fields provided → update. **200** + DTO |
+| `DELETE /organization` | SessionAuthGuard → RolesGuard(`PM`, `Admin`) | Same load + policy checks → hard delete → **204** No Content |
+
+Create stays `@Roles('PM')` — the Admin break-glass covers update/delete only, not creation.
 
 ## 5. ABAC design
 
@@ -84,10 +86,12 @@ Implemented via a small policy consulted by the service, plus a role guard for t
 
 - **Subject attributes**: `role`, `userId` — taken from the Redis session snapshot (never from the request body).
 - **Resource attributes**: `createdByUserId` — loaded once from the DB.
-- **Actions**: `view` (any valid session), `create` (PM), `update` / `delete` (PM ∧ creator).
-- Admin and Dev → **403** `pm_required` on create/update/delete; they can still `GET`.
+- **Actions**: `view` (any valid session), `create` (PM only), `update` / `delete` — `(PM ∧ owner) ∨ Admin`.
+- **Admin break-glass** exists so the organization cannot be orphaned: if the creator's account is deleted or demoted, an Admin can still update or delete it. The role check uses the session snapshot — no extra query.
+- **Residual risk (accepted)**: if the creator is gone and no Admin account exists, the org is unmodifiable until an Admin exists.
+- Dev → **403** `pm_required` on create/update/delete; non-owner PM → **403** `not_organization_owner` on update/delete; both can still `GET`.
 
-`organization.policy.ts` exposes `canManage(actor: SessionUser, org: Organization): boolean`. `RolesGuard` (in `common/guards`, Reflector-based, reading `@Roles(...)`) enforces the role attribute on mutating routes; ownership is checked in the service after the single load, so the org row is never fetched twice.
+`organization.policy.ts` exposes `canManage(actor: SessionUser, org: Organization): boolean` — true for `role === 'Admin'`, true for a PM only when `actor.userId === org.createdByUserId`, false otherwise. `RolesGuard` (in `common/guards`, Reflector-based, reading `@Roles(...)`) enforces the role attribute on mutating routes; ownership is checked in the service after the single load, so the org row is never fetched twice.
 
 `SessionAuthGuard` (in `auth/api/guards`): reads the `nexus_sid` cookie → `SessionService.get(sid)` → attaches `SessionUser` to `req.user`; missing/corrupt/expired session → **401** with `UNAUTHENTICATED_MESSAGE`. Applied on the organization controller only — not registered globally yet (the auth plan explicitly deferred a global guard; this stays scoped).
 
@@ -105,7 +109,7 @@ Injectable provider, registered in the organization module. The repository keeps
 ## 7. Validation
 
 - `name`: `@Trim @IsString @MinLength(2) @MaxLength(100)`
-- `slug`: `@Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)` — same as the frontend `SLUG_PATTERN`, length 3–63, lowercase via transform
+- `slug`: `@Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)` — same as the frontend `SLUG_PATTERN`, `@MinLength(3) @MaxLength(63)`, lowercase via transform. The schema column is `varchar(63)`, so DB and DTO bounds agree — no path exists for a >63-char slug to reach the database
 - `PATCH`: same rules with everything `@IsOptional()`
 - Empty PATCH after whitelist stripping: class-validator cannot express "at least one field" — the service checks `Object.keys(dto).length === 0` → 400 `empty_update`
 - Unknown body fields are stripped by the global `ValidationPipe({ whitelist: true })`
@@ -116,8 +120,12 @@ Injectable provider, registered in the organization module. The repository keeps
 |---|---|
 | Second create (sequential) | 409 `organization_exists` |
 | Two concurrent creates | One 201; the loser hits `23505` → 409 (race-safe) |
-| Dev/Admin create/update/delete | 403 `pm_required` |
+| Dev create/update/delete | 403 `pm_required` |
+| Admin create | 403 `pm_required` (break-glass covers update/delete only) |
+| Admin update/delete | Allowed regardless of ownership |
 | Non-owner PM update/delete | 403 `not_organization_owner` |
+| Creator deleted or demoted | Admin can still update/delete — no lock-out |
+| Row inserted with `singleton = false` | Rejected by the CHECK constraint |
 | Update/delete with no organization | 404 `organization_not_found` |
 | Empty PATCH body | 400 `empty_update` |
 | No / invalid / expired session cookie | 401 `unauthenticated` |
@@ -147,7 +155,7 @@ Injectable provider, registered in the organization module. The repository keeps
 
 ## 11. Tests and verification
 
-- `organization.service.spec.ts` — create success, 409 conflict mapping, owner-allowed vs non-owner 403, 404 paths, empty-update 400, factory wiring (mock repository + policy).
+- `organization.service.spec.ts` — create success, 409 conflict mapping, owner-PM allowed, non-owner PM 403, Admin update/delete allowed regardless of ownership, Admin create → 403, 404 paths, empty-update 400, factory wiring (mock repository + policy).
 - `organization.controller.spec.ts` — guard composition and status codes (mock service).
 - Commands (from `Backend/`): `npm test`, `npm run typecheck`, `npm run lint`. Fixing the `app.module.ts` import also makes the repo typecheck again (lefthook hooks currently fail on it).
 
@@ -164,5 +172,7 @@ Injectable provider, registered in the organization module. The repository keeps
 ## 13. Assumptions
 
 - Slug unique-index is skipped — irrelevant while only one row can exist; revisit with the members feature.
+- The Admin break-glass is the accepted answer to the creator lock-out problem; the residual orphan case (creator gone, no Admin) is a known, accepted limitation for now.
+- The singleton constraint is written in Drizzle as `check('organizations_singleton_check', sql`singleton = true`)` in the table config.
 - `createdByUserId` is included in `OrganizationResponseDto` so the frontend can compare it against the session user to know who owns the org.
 - No `session.touch()` sliding-expiry call in the guard; the auth controller handles session usage today.
