@@ -4,6 +4,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CommonModule } from './common/common.module';
 import { AuthModule } from './module/auth/api/auth.module';
 import { HealthModule } from './module/health/health.module';
+import { OrganizationModule } from './organization/organization.module';
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { HealthModule } from './module/health/health.module';
     AuthModule,
     // Global abuse control (per-IP); register/resend tighten further via @Throttle.
     ThrottlerModule.forRoot([{ name: 'default', limit: 100, ttl: 60_000 }]),
+    OrganizationModule,
   ],
   providers: [
     // Enforces ThrottlerModule limits + every @Throttle override (register
