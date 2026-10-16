@@ -1,7 +1,11 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import type { Organization } from '@/lib/api';
 import type { AppDispatch, RootState } from '@/store';
-import { fetchOrganization } from '@/store/slices/orgSlice';
+import {
+  fetchOrganization,
+  refreshOrganization,
+} from '@/store/slices/orgSlice';
 
 export const useAppDispatch = useDispatch.withTypes<AppDispatch>();
 export const useAppSelector = useSelector.withTypes<RootState>();
@@ -25,5 +29,9 @@ export function useOrganization() {
     void dispatch(fetchOrganization());
   };
 
-  return { org, status, error, retry };
+  /** "Check again" — always GETs fresh; resolves to the (possibly null) org. */
+  const refresh = (): Promise<Organization | null> =>
+    dispatch(refreshOrganization());
+
+  return { org, status, error, retry, refresh };
 }

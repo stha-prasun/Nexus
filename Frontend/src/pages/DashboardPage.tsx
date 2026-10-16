@@ -59,6 +59,7 @@ export function DashboardPage() {
     status: orgStatus,
     error: orgError,
     retry: retryOrg,
+    refresh: refreshOrg,
   } = useOrganization();
 
   /** This device only — "log out everywhere" lives on the profile page. */
@@ -73,6 +74,28 @@ export function DashboardPage() {
       dispatch(setAnonymous());
       navigate('/', { replace: true });
     })();
+  };
+
+  /**
+   * "Check again" from NoOrgView: a fresh GET. A found organization flips
+   * the store and this page swaps to OrgView on its own; still-null and
+   * errors are surfaced as toasts.
+   */
+  const handleCheckAgain = async (): Promise<void> => {
+    try {
+      const organization = await refreshOrg();
+      if (organization === null) {
+        show(
+          `Still no organization. Ask your Admin to add ${authUser?.email ?? 'your email'}.`,
+        );
+      }
+    } catch (error) {
+      show(
+        error instanceof ApiError
+          ? error.messages.join(' ')
+          : 'Something went wrong. Please try again.',
+      );
+    }
   };
 
   const { members, projects } = state;
@@ -395,7 +418,12 @@ export function DashboardPage() {
         ) : canManageOrg ? (
           <EmptyOrgView onCreate={handleCreateOrg} />
         ) : (
-          <NoOrgView />
+          <NoOrgView
+            email={authUser?.email ?? members[0]?.email ?? CURRENT_USER.email}
+            onCheckAgain={handleCheckAgain}
+            onSignOut={handleLogout}
+            onToast={show}
+          />
         )}
       </div>
       {dialogElement}

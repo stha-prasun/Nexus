@@ -99,4 +99,37 @@ export function fetchOrganization() {
   };
 }
 
+/**
+ * "Check again" refetch: always GETs fresh (unlike `fetchOrganization`,
+ * which stays cached while `ready`). A successful result overwrites the
+ * cache — if an organization now exists, `org` flips non-null and the
+ * dashboard swaps to the org view on its own. Never touches `status`, so
+ * the current view doesn't flash to the loading spinner; failures are
+ * rethrown for the caller to surface (a 401 still ends the session).
+ */
+export function refreshOrganization() {
+  return async (
+    dispatch: AppDispatch,
+    getState: () => RootState,
+  ): Promise<Organization | null> => {
+    if (getState().org.status === 'loading') return getState().org.org;
+    try {
+      const organization = await getOrganization();
+      if (getState().auth.status !== 'authenticated') {
+        dispatch(clearOrg());
+        return null;
+      }
+      dispatch(fetchSucceeded(organization));
+      return organization;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        dispatch(clearOrg());
+        dispatch(setAnonymous());
+        return null;
+      }
+      throw error;
+    }
+  };
+}
+
 export default orgSlice.reducer;

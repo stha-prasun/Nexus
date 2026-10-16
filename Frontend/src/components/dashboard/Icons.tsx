@@ -95,6 +95,23 @@ export function WarningIcon({ className }: { className?: string }) {
   );
 }
 
+/** Envelope for the "ask your Admin to add you" card. */
+export function MailIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className ?? 'h-6 w-6 shrink-0'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="square"
+      aria-hidden="true"
+    >
+      <path d="M4 7h16v12H4zM4 7l8 6 8-6" />
+    </svg>
+  );
+}
+
 /** Padlock for nav items that need an organization first. */
 export function LockIcon({ className }: { className?: string }) {
   return (
