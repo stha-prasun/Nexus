@@ -9,7 +9,10 @@ import {
   MinLength,
 } from 'class-validator';
 import { NormalizeEmail, NormalizeName } from '../../../../common/decorators';
-import { ROLES, type Role } from '../constants/auth.constants';
+import {
+  REGISTERABLE_ROLES,
+  type RegisterableRole,
+} from '../constants/auth.constants';
 
 export class RegisterDto {
   @ApiProperty({ example: 'Ada Lovelace', minLength: 2, maxLength: 100 })
@@ -46,8 +49,16 @@ export class RegisterDto {
   )
   password!: string;
 
-  @ApiProperty({ enum: ROLES, example: 'Dev' })
+  @ApiProperty({
+    enum: REGISTERABLE_ROLES,
+    example: 'Dev',
+    description:
+      'Signup role — Admin accounts are provisioned internally and rejected here.',
+  })
   @IsString()
-  @IsIn(ROLES)
-  role!: Role;
+  @IsIn(REGISTERABLE_ROLES, {
+    message:
+      'Choose PM, HR or Dev — Admin accounts are provisioned internally.',
+  })
+  role!: RegisterableRole;
 }

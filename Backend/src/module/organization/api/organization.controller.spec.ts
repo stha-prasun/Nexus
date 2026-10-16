@@ -38,7 +38,7 @@ describe('OrganizationController', () => {
     ({
       user: {
         userId: OWNER_ID,
-        role: 'PM',
+        role: 'Admin',
         name: 'Ada',
         email: 'ada@example.com',
       },
@@ -91,11 +91,11 @@ describe('OrganizationController', () => {
   });
 
   describe('guard composition', () => {
-    it('POST requires session + roles (PM) and is throttled 5/10min', () => {
+    it('POST requires session + roles (Admin) and is throttled 5/10min', () => {
       const target = handler('create');
 
       expect(guardsOf(target)).toEqual([SessionAuthGuard, RolesGuard]);
-      expect(rolesOf(target)).toEqual(['PM']);
+      expect(rolesOf(target)).toEqual(['Admin']);
       expect(Reflect.getMetadata(THROTTLER_LIMIT_DEFAULT, target)).toBe(5);
       expect(Reflect.getMetadata(THROTTLER_TTL_DEFAULT, target)).toBe(600_000);
     });
@@ -107,18 +107,18 @@ describe('OrganizationController', () => {
       expect(rolesOf(target)).toBeUndefined();
     });
 
-    it('PATCH and DELETE require session + roles (PM, Admin) and DELETE answers 204', () => {
+    it('PATCH and DELETE require session + roles (Admin) and DELETE answers 204', () => {
       expect(guardsOf(handler('update'))).toEqual([
         SessionAuthGuard,
         RolesGuard,
       ]);
-      expect(rolesOf(handler('update'))).toEqual(['PM', 'Admin']);
+      expect(rolesOf(handler('update'))).toEqual(['Admin']);
 
       expect(guardsOf(handler('remove'))).toEqual([
         SessionAuthGuard,
         RolesGuard,
       ]);
-      expect(rolesOf(handler('remove'))).toEqual(['PM', 'Admin']);
+      expect(rolesOf(handler('remove'))).toEqual(['Admin']);
       expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler('remove'))).toBe(
         204,
       );

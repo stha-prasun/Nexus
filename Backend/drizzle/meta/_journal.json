@@ -36,6 +36,13 @@
       "when": 1792078488245,
       "tag": "0004_woozy_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1792126505645,
+      "tag": "0005_curved_wonder_man",
+      "breakpoints": true
     }
   ]
 }

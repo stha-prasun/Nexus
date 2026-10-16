@@ -1,5 +1,7 @@
 # Organization Module — Implementation Plan
 
+> **Superseded** by [admin-organization-plan.md](./admin-organization-plan.md): the organization is now Admin-managed (create/edit/delete = Admin only; PM lost its owner rights; HR role added). This document is kept as historical context and not rewritten.
+
 Backend-only plan for the organization feature. Frontend and the members feature are explicitly out of scope for this pass.
 
 ## 1. Confirmed decisions

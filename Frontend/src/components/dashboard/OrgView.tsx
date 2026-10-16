@@ -8,8 +8,12 @@ interface OrgViewProps {
   org: Org;
   members: Member[];
   projects: Project[];
+  /** Display role for "you" (hero badge, description line) — from the real session. */
   viewAs: RoleKey;
-  canManage: boolean;
+  /** Edit/delete the organization — Admin only. */
+  canManageOrg: boolean;
+  /** Invite/remove members and change their roles — visual only until member APIs land. */
+  canManageMembers: boolean;
   graphKey: number;
   onAddMember: () => void;
   onRemoveMember: (index: number) => void;
@@ -216,7 +220,8 @@ export function OrgView({
   members,
   projects,
   viewAs,
-  canManage,
+  canManageOrg,
+  canManageMembers,
   graphKey,
   onAddMember,
   onRemoveMember,
@@ -229,7 +234,7 @@ export function OrgView({
     const isMe = i === 0;
     const role = isMe ? viewAs : member.role;
     const roleCell =
-      canManage && !isMe ? (
+      canManageMembers && !isMe ? (
         <RoleSelect
           value={member.role}
           ariaLabel={`Role for ${member.name}`}
@@ -271,7 +276,7 @@ export function OrgView({
           {status}
         </span>
         <div className="hidden text-right sm:block">
-          {canManage && !isMe ? (
+          {canManageMembers && !isMe ? (
             <button
               type="button"
               onClick={() => onRemoveMember(i)}
@@ -312,7 +317,7 @@ export function OrgView({
     </li>
   ));
 
-  if (canManage) {
+  if (canManageMembers) {
     cells.push(
       <li key="new-project" className="bg-white">
         <button
@@ -370,7 +375,7 @@ export function OrgView({
                 {`You're ${viewAs === 'admin' ? 'an' : 'a'} ${ROLES[viewAs].label}`}
               </span>
             </div>
-            {canManage ? (
+            {canManageOrg ? (
               <button
                 type="button"
                 onClick={onEditOrg}
@@ -403,7 +408,7 @@ export function OrgView({
               {pad2(members.length)}
             </span>
           </h2>
-          {canManage ? (
+          {canManageMembers ? (
             <button type="button" onClick={onAddMember} className={BTN}>
               Add member
             </button>
@@ -431,18 +436,18 @@ export function OrgView({
             {pad2(projects.length)}
           </span>
         </h2>
-        {projects.length > 0 || canManage ? (
+        {projects.length > 0 || canManageMembers ? (
           <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">
             {cells}
           </ul>
         ) : (
           <p className="border border-dashed border-ink-line p-8 text-center text-sm text-ink-soft">
-            No projects yet. Your PM will add them here.
+            No projects yet. Your Admin or PM will add them here.
           </p>
         )}
       </section>
 
-      {canManage ? (
+      {canManageOrg ? (
         <section
           className="mt-12 border-2 border-red-600"
           aria-labelledby="h-danger"

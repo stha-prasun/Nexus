@@ -1,8 +1,8 @@
 import type { Role } from '@/lib/api';
 
-export type RoleKey = 'pm' | 'admin' | 'dev';
+export type RoleKey = 'pm' | 'admin' | 'dev' | 'hr';
 
-/** Sign-up role from the auth store ('PM' | 'Dev' | 'Admin') → dashboard key. */
+/** Session role from the auth store ('PM' | 'Dev' | 'Admin' | 'HR') → dashboard key. */
 export const toRoleKey = (role: Role): RoleKey => role.toLowerCase() as RoleKey;
 
 export const ROLES: Record<
@@ -13,13 +13,19 @@ export const ROLES: Record<
     label: 'PM',
     cls: 'bg-cobalt text-white',
     dot: 'bg-cobalt',
-    desc: 'Creates and manages projects, the organization and its members.',
+    desc: 'Creates and manages projects and its members.',
   },
   admin: {
     label: 'Admin',
     cls: 'bg-sun text-ink',
     dot: 'bg-sun',
-    desc: 'Can oversee any project in the organization.',
+    desc: 'Creates, edits and deletes the organization.',
+  },
+  hr: {
+    label: 'HR',
+    cls: 'bg-mist text-ink',
+    dot: 'bg-ink-soft',
+    desc: 'Handles people operations and member invitations.',
   },
   dev: {
     label: 'Dev',
@@ -29,7 +35,7 @@ export const ROLES: Record<
   },
 };
 
-export const ROLE_ORDER: RoleKey[] = ['pm', 'admin', 'dev'];
+export const ROLE_ORDER: RoleKey[] = ['pm', 'hr', 'dev', 'admin'];
 
 export interface Member {
   name: string;

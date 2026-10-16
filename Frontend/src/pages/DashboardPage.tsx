@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
+import { NoOrgView } from '@/components/dashboard/NoOrgView';
 import { OrgView, RoleSelect } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
 import {
@@ -74,14 +75,20 @@ export function DashboardPage() {
     })();
   };
 
-  const { members, projects, viewAs } = state;
-  const canManage = viewAs === 'pm';
+  const { members, projects } = state;
+  // Real session role drives gating — the demo `viewAs` state no longer does.
+  const roleKey: RoleKey = authUser ? toRoleKey(authUser.role) : 'pm';
+  const canManageOrg = authUser?.role === 'Admin';
+  const canManageMembers =
+    authUser != null && ['Admin', 'HR', 'PM'].includes(authUser.role);
 
   useEffect(() => {
     document.title = org
       ? `${org.name} · Nexus`
-      : 'Create organization · Nexus';
-  }, [org]);
+      : canManageOrg
+        ? 'Create organization · Nexus'
+        : 'Organization · Nexus';
+  }, [org, canManageOrg]);
 
   const bumpGraph = (): void => setViewKey((key) => key + 1);
 
@@ -297,18 +304,18 @@ export function DashboardPage() {
 
   /**
    * POSTs the real singleton; ApiError propagates so EmptyOrgView can show
-   * it inline (409 race, 403 pm_required, 429 throttle, 400 validation).
+   * it inline (409 race, 403 role_forbidden, 429 throttle, 400 validation).
    */
   const handleCreateOrg = async (created: Org): Promise<void> => {
     const organization = await createOrganization(created);
     dispatch(setOrg(organization));
     setState((current) => ({
       ...current,
-      viewAs: 'pm',
+      viewAs: 'admin',
       members: [
         authUser
-          ? { name: authUser.name, email: authUser.email, role: 'pm' }
-          : { ...(current.members[0] ?? { ...CURRENT_USER }), role: 'pm' },
+          ? { name: authUser.name, email: authUser.email, role: 'admin' }
+          : { ...(current.members[0] ?? { ...CURRENT_USER }), role: 'admin' },
       ],
       projects: [],
     }));
@@ -374,8 +381,9 @@ export function DashboardPage() {
             org={org}
             members={members}
             projects={projects}
-            viewAs={viewAs}
-            canManage={canManage}
+            viewAs={roleKey}
+            canManageOrg={canManageOrg}
+            canManageMembers={canManageMembers}
             graphKey={viewKey}
             onAddMember={() => void handleAddMember()}
             onRemoveMember={(index) => void handleRemoveMember(index)}
@@ -384,8 +392,10 @@ export function DashboardPage() {
             onDeleteOrg={() => void handleDeleteOrg()}
             onNewProject={() => show('Projects page is next')}
           />
-        ) : (
+        ) : canManageOrg ? (
           <EmptyOrgView onCreate={handleCreateOrg} />
+        ) : (
+          <NoOrgView />
         )}
       </div>
       {dialogElement}

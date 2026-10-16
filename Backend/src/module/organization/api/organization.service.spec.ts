@@ -1,12 +1,16 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
+import {
+  REGISTERABLE_ROLES,
+  ROLES,
+} from '../../auth/api/constants/auth.constants';
 import type { SessionUser } from '../../auth/api/session/session.types';
 import {
+  ADMIN_REQUIRED_MESSAGE,
   EMPTY_UPDATE_MESSAGE,
   NOT_ORGANIZATION_OWNER_MESSAGE,
   ORGANIZATION_EXISTS_MESSAGE,
   ORGANIZATION_NOT_FOUND_MESSAGE,
-  PM_REQUIRED_MESSAGE,
 } from './constants/organization.constants';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -54,6 +58,12 @@ describe('OrganizationService', () => {
     name: 'Dev',
     email: 'dev@example.com',
   };
+  const hr: SessionUser = {
+    userId: 'user-hr',
+    role: 'HR',
+    name: 'Hana',
+    email: 'hana@example.com',
+  };
 
   const organization = (overrides: Partial<Organization> = {}): Organization =>
     new Organization({
@@ -99,28 +109,28 @@ describe('OrganizationService', () => {
   });
 
   describe('create', () => {
-    it('inserts the factory-built entity and returns it (owner recorded)', async () => {
+    it('inserts the factory-built entity and returns it (creator recorded)', async () => {
       repository.findSingleton.mockResolvedValue(null);
       const dto = createDto();
       dto.slug = ' ACME-Inc '; // factory normalizes even a pre-cleaned DTO
       const inserted = organization();
       repository.insert.mockResolvedValue(inserted);
 
-      const result = await service.create(dto, ownerPm);
+      const result = await service.create(dto, admin);
 
       expect(result).toBe(inserted);
       const built = repository.insert.mock.calls[0][0];
       expect(built.id).toEqual(expect.any(String));
       expect(built.name).toBe('Acme Inc');
       expect(built.slug).toBe('acme-inc');
-      expect(built.createdByUserId).toBe(ownerPm.userId);
+      expect(built.createdByUserId).toBe(admin.userId);
       expect(built.createdAt).toBe(built.updatedAt);
     });
 
     it('409 organization_exists when a row already exists', async () => {
       repository.findSingleton.mockResolvedValue(organization());
 
-      await expect(service.create(createDto(), ownerPm)).rejects.toMatchObject({
+      await expect(service.create(createDto(), admin)).rejects.toMatchObject({
         status: 409,
         response: {
           status: 'organization_exists',
@@ -138,23 +148,26 @@ describe('OrganizationService', () => {
       });
       repository.insert.mockRejectedValue(conflict);
 
-      await expect(service.create(createDto(), ownerPm)).rejects.toBe(conflict);
+      await expect(service.create(createDto(), admin)).rejects.toBe(conflict);
     });
 
-    it('403 pm_required for Admin — break-glass covers update/delete only', async () => {
-      await expect(service.create(createDto(), admin)).rejects.toMatchObject({
-        status: 403,
-        response: { status: 'pm_required', message: PM_REQUIRED_MESSAGE },
-      });
-      expect(repository.findSingleton).not.toHaveBeenCalled();
-    });
-
-    it('403 pm_required for Dev', async () => {
-      await expect(service.create(createDto(), dev)).rejects.toMatchObject({
-        status: 403,
-        response: { status: 'pm_required' },
-      });
-    });
+    it.each([
+      ['PM', ownerPm],
+      ['HR', hr],
+      ['Dev', dev],
+    ] as const)(
+      '403 admin_required for %s — create is Admin-only',
+      async (_role, actor) => {
+        await expect(service.create(createDto(), actor)).rejects.toMatchObject({
+          status: 403,
+          response: {
+            status: 'admin_required',
+            message: ADMIN_REQUIRED_MESSAGE,
+          },
+        });
+        expect(repository.findSingleton).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('find', () => {
@@ -173,16 +186,13 @@ describe('OrganizationService', () => {
   });
 
   describe('update', () => {
-    it('allows the owner PM and persists the provided fields', async () => {
+    it('allows Admin and persists the provided fields', async () => {
       const existing = organization();
       const updated = organization();
       repository.findSingleton.mockResolvedValue(existing);
       repository.update.mockResolvedValue(updated);
 
-      const result = await service.update(
-        updateDto({ name: 'Acme 2' }),
-        ownerPm,
-      );
+      const result = await service.update(updateDto({ name: 'Acme 2' }), admin);
 
       expect(result).toBe(updated);
       expect(repository.update).toHaveBeenCalledWith('org-1', {
@@ -190,7 +200,7 @@ describe('OrganizationService', () => {
       });
     });
 
-    it('allows Admin regardless of ownership', async () => {
+    it('allows Admin even when another user created the row', async () => {
       repository.findSingleton.mockResolvedValue(organization());
       repository.update.mockResolvedValue(organization());
 
@@ -203,6 +213,21 @@ describe('OrganizationService', () => {
       expect(repository.update).toHaveBeenCalledWith('org-1', {
         slug: 'new-slug',
       });
+    });
+
+    it('403 not_organization_owner for a PM — even the owner (Admin manages alone)', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+
+      await expect(
+        service.update(updateDto({ name: 'Nope' }), ownerPm),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: {
+          status: 'not_organization_owner',
+          message: NOT_ORGANIZATION_OWNER_MESSAGE,
+        },
+      });
+      expect(repository.update).not.toHaveBeenCalled();
     });
 
     it('403 not_organization_owner for a non-owner PM', async () => {
@@ -220,11 +245,22 @@ describe('OrganizationService', () => {
       expect(repository.update).not.toHaveBeenCalled();
     });
 
+    it('403 not_organization_owner for HR and Dev', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+
+      await expect(
+        service.update(updateDto({ name: 'Nope' }), hr),
+      ).rejects.toMatchObject({ status: 403 });
+      await expect(
+        service.update(updateDto({ name: 'Nope' }), dev),
+      ).rejects.toMatchObject({ status: 403 });
+    });
+
     it('404 organization_not_found when no organization exists', async () => {
       repository.findSingleton.mockResolvedValue(null);
 
       await expect(
-        service.update(updateDto({ name: 'Acme' }), ownerPm),
+        service.update(updateDto({ name: 'Acme' }), admin),
       ).rejects.toMatchObject({
         status: 404,
         response: {
@@ -237,9 +273,7 @@ describe('OrganizationService', () => {
     it('400 empty_update when no known fields are provided', async () => {
       repository.findSingleton.mockResolvedValue(organization());
 
-      await expect(
-        service.update(updateDto({}), ownerPm),
-      ).rejects.toMatchObject({
+      await expect(service.update(updateDto({}), admin)).rejects.toMatchObject({
         status: 400,
         response: { status: 'empty_update', message: EMPTY_UPDATE_MESSAGE },
       });
@@ -251,22 +285,13 @@ describe('OrganizationService', () => {
       repository.update.mockResolvedValue(null);
 
       await expect(
-        service.update(updateDto({ name: 'Acme' }), ownerPm),
+        service.update(updateDto({ name: 'Acme' }), admin),
       ).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('remove', () => {
-    it('hard-deletes for the owner PM', async () => {
-      repository.findSingleton.mockResolvedValue(organization());
-      repository.remove.mockResolvedValue();
-
-      await service.remove(ownerPm);
-
-      expect(repository.remove).toHaveBeenCalledWith('org-1');
-    });
-
-    it('hard-deletes for Admin regardless of ownership', async () => {
+    it('hard-deletes for Admin', async () => {
       repository.findSingleton.mockResolvedValue(organization());
       repository.remove.mockResolvedValue();
 
@@ -275,23 +300,47 @@ describe('OrganizationService', () => {
       expect(repository.remove).toHaveBeenCalledWith('org-1');
     });
 
-    it('403 not_organization_owner for a non-owner PM', async () => {
+    it('403 not_organization_owner for a PM — even the owner (Admin manages alone)', async () => {
       repository.findSingleton.mockResolvedValue(organization());
 
-      await expect(service.remove(otherPm)).rejects.toMatchObject({
+      await expect(service.remove(ownerPm)).rejects.toMatchObject({
         status: 403,
         response: { status: 'not_organization_owner' },
       });
       expect(repository.remove).not.toHaveBeenCalled();
     });
 
+    it('403 not_organization_owner for a non-owner PM, HR and Dev', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+
+      await expect(service.remove(otherPm)).rejects.toMatchObject({
+        status: 403,
+        response: { status: 'not_organization_owner' },
+      });
+      await expect(service.remove(hr)).rejects.toMatchObject({ status: 403 });
+      await expect(service.remove(dev)).rejects.toMatchObject({ status: 403 });
+      expect(repository.remove).not.toHaveBeenCalled();
+    });
+
     it('404 organization_not_found when no organization exists', async () => {
       repository.findSingleton.mockResolvedValue(null);
 
-      await expect(service.remove(ownerPm)).rejects.toMatchObject({
+      await expect(service.remove(admin)).rejects.toMatchObject({
         status: 404,
         response: { status: 'organization_not_found' },
       });
+    });
+  });
+
+  describe('role constants consistency', () => {
+    it("REGISTERABLE_ROLES ⊂ ROLES, 'HR' ∈ ROLES, and Admin is not registerable", () => {
+      for (const role of REGISTERABLE_ROLES) {
+        expect(ROLES).toContain(role);
+      }
+      expect(ROLES).toContain('HR');
+      expect(REGISTERABLE_ROLES).not.toContain(
+        'Admin' as (typeof REGISTERABLE_ROLES)[number],
+      );
     });
   });
 });

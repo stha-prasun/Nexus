@@ -9,9 +9,9 @@ import type { Request } from 'express';
 import type { Role } from '../../module/auth/api/constants/auth.constants';
 import type { SessionUser } from '../../module/auth/api/session/session.types';
 import {
-  PM_REQUIRED_MESSAGE,
-  PM_REQUIRED_STATUS,
-} from '../../module/organization/api/constants/organization.constants';
+  ROLE_FORBIDDEN_MESSAGE,
+  ROLE_FORBIDDEN_STATUS,
+} from '../constants/role.constants';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
 /**
@@ -19,9 +19,9 @@ import { ROLES_KEY } from '../decorators/roles.decorator';
  * snapshot attached by `SessionAuthGuard` — never attributes from the
  * request body. Routes without `@Roles` pass through untouched.
  *
- * The role-failure body is `pm_required` because every role-gated route so
- * far is PM-gated (organization create/update/delete); the vocabulary lives
- * with that first consumer (organization.constants.ts). Fails closed when
+ * The failure body is the generic `role_forbidden` (see
+ * common/constants/role.constants.ts); callers may gate any subset of
+ * ROLES (e.g. Admin-only organization management). Fails closed when
  * `req.user` is missing, i.e. `SessionAuthGuard` was not applied.
  */
 @Injectable()
@@ -47,8 +47,8 @@ export class RolesGuard implements CanActivate {
       return true;
     }
     throw new ForbiddenException({
-      status: PM_REQUIRED_STATUS,
-      message: PM_REQUIRED_MESSAGE,
+      status: ROLE_FORBIDDEN_STATUS,
+      message: ROLE_FORBIDDEN_MESSAGE,
     });
   }
 }

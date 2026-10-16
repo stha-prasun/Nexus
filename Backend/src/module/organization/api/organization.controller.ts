@@ -49,11 +49,11 @@ export class OrganizationController {
 
   @Post()
   @UseGuards(SessionAuthGuard, RolesGuard)
-  @Roles('PM')
+  @Roles('Admin')
   @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @ApiOperation({
     summary:
-      'Create the system-wide organization (PM only); 409 while one already exists',
+      'Create the system-wide organization (Admin only); 409 while one already exists',
   })
   @ApiCreatedResponse({ type: OrganizationResponseDto })
   @ApiConflictResponse({
@@ -65,8 +65,11 @@ export class OrganizationController {
     ),
   })
   @ApiForbiddenResponse({
-    description: '403 { status: "pm_required", message } — Dev or Admin',
-    ...example('pm_required', 'Only a PM can perform this action.'),
+    description: '403 { status: "role_forbidden", message } — non-Admin role',
+    ...example(
+      'role_forbidden',
+      'Your role is not allowed to perform this action.',
+    ),
   })
   @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })
   async create(
@@ -95,10 +98,8 @@ export class OrganizationController {
 
   @Patch()
   @UseGuards(SessionAuthGuard, RolesGuard)
-  @Roles('PM', 'Admin')
-  @ApiOperation({
-    summary: 'Update the organization (owner PM or Admin break-glass)',
-  })
+  @Roles('Admin')
+  @ApiOperation({ summary: 'Update the organization (Admin only)' })
   @ApiOkResponse({ type: OrganizationResponseDto })
   @ApiBadRequestResponse({
     description:
@@ -111,10 +112,10 @@ export class OrganizationController {
   })
   @ApiForbiddenResponse({
     description:
-      '403 { status: "not_organization_owner", message } — non-owner PM',
+      '403 { status: "role_forbidden", message } — non-Admin role (RolesGuard)',
     ...example(
-      'not_organization_owner',
-      'Only the organization owner can perform this action.',
+      'role_forbidden',
+      'Your role is not allowed to perform this action.',
     ),
   })
   @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })
@@ -129,10 +130,8 @@ export class OrganizationController {
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   @UseGuards(SessionAuthGuard, RolesGuard)
-  @Roles('PM', 'Admin')
-  @ApiOperation({
-    summary: 'Hard-delete the organization (owner PM or Admin break-glass)',
-  })
+  @Roles('Admin')
+  @ApiOperation({ summary: 'Hard-delete the organization (Admin only)' })
   @ApiNoContentResponse({ description: '204 — the organization is deleted' })
   @ApiNotFoundResponse({
     description: '404 { status: "organization_not_found", message }',
@@ -140,10 +139,10 @@ export class OrganizationController {
   })
   @ApiForbiddenResponse({
     description:
-      '403 { status: "not_organization_owner", message } — non-owner PM',
+      '403 { status: "role_forbidden", message } — non-Admin role (RolesGuard)',
     ...example(
-      'not_organization_owner',
-      'Only the organization owner can perform this action.',
+      'role_forbidden',
+      'Your role is not allowed to perform this action.',
     ),
   })
   @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })

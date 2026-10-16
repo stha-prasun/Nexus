@@ -1,7 +1,7 @@
 const BASE_URL: string =
   import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1';
 
-export type Role = 'PM' | 'Dev' | 'Admin';
+export type Role = 'PM' | 'Dev' | 'Admin' | 'HR';
 
 export interface RegisterPayload {
   name: string;
@@ -228,7 +228,7 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
-  /** User id of the PM who created the organization (its owner). */
+  /** User id of the Admin who created the organization (records provenance only — grants no rights). */
   createdByUserId: string;
   createdAt: string;
   updatedAt: string;

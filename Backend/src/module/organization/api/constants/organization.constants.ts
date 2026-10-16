@@ -7,14 +7,14 @@ export const ORGANIZATION_EXISTS_MESSAGE =
 export const ORGANIZATION_NOT_FOUND_STATUS = 'organization_not_found';
 export const ORGANIZATION_NOT_FOUND_MESSAGE = 'Organization not found.';
 
-/** 403 — a PM who does not own the organization tried to manage it. */
+/** 403 — a non-Admin tried to manage the organization (defense in depth). */
 export const NOT_ORGANIZATION_OWNER_STATUS = 'not_organization_owner';
 export const NOT_ORGANIZATION_OWNER_MESSAGE =
-  'Only the organization owner can perform this action.';
+  'Only an Admin can manage the organization.';
 
-/** 403 — role below PM (Dev), or Admin attempting create. */
-export const PM_REQUIRED_STATUS = 'pm_required';
-export const PM_REQUIRED_MESSAGE = 'Only a PM can perform this action.';
+/** 403 — role other than Admin attempted create (defense in depth). */
+export const ADMIN_REQUIRED_STATUS = 'admin_required';
+export const ADMIN_REQUIRED_MESSAGE = 'Only an Admin can perform this action.';
 
 /** 400 — PATCH body stripped down to zero known fields. */
 export const EMPTY_UPDATE_STATUS = 'empty_update';

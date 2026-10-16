@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import type { SessionUser } from '../../auth/api/session/session.types';
 import {
+  ADMIN_REQUIRED_MESSAGE,
+  ADMIN_REQUIRED_STATUS,
   EMPTY_UPDATE_MESSAGE,
   EMPTY_UPDATE_STATUS,
   NOT_ORGANIZATION_OWNER_MESSAGE,
@@ -15,8 +17,6 @@ import {
   ORGANIZATION_EXISTS_STATUS,
   ORGANIZATION_NOT_FOUND_MESSAGE,
   ORGANIZATION_NOT_FOUND_STATUS,
-  PM_REQUIRED_MESSAGE,
-  PM_REQUIRED_STATUS,
 } from './constants/organization.constants';
 import type { CreateOrganizationDto } from './dto/create-organization.dto';
 import type { UpdateOrganizationDto } from './dto/update-organization.dto';
@@ -27,9 +27,10 @@ import { OrganizationRepository } from './repositories/organization.repository';
 
 /**
  * Orchestration for the singleton organization. Role gating lives in
- * `RolesGuard` (create keeps a defensive PM-only check here); ownership is
- * decided by the policy after the single load, so the row is never fetched
- * twice. All role/owner attributes come from the session snapshot.
+ * `RolesGuard` (create keeps a defensive Admin-only check here); the
+ * manage check is decided by the policy after the single load, so the row
+ * is never fetched twice. All role attributes come from the session
+ * snapshot.
  */
 @Injectable()
 export class OrganizationService {
@@ -40,19 +41,19 @@ export class OrganizationService {
   ) {}
 
   /**
-   * Defense in depth behind `@Roles('PM')`: the Admin break-glass covers
-   * update/delete only — creation stays PM-only. The pre-check answers the
-   * sequential 409; the repository maps the concurrent race (23505) to the
-   * same body.
+   * Defense in depth behind `@Roles('Admin')`: only Admins create the
+   * organization (HR/PM/Dev never could; Admin accounts are seeded later).
+   * The pre-check answers the sequential 409; the repository maps the
+   * concurrent race (23505) to the same body.
    */
   async create(
     dto: CreateOrganizationDto,
     actor: SessionUser,
   ): Promise<Organization> {
-    if (actor.role !== 'PM') {
+    if (actor.role !== 'Admin') {
       throw new ForbiddenException({
-        status: PM_REQUIRED_STATUS,
-        message: PM_REQUIRED_MESSAGE,
+        status: ADMIN_REQUIRED_STATUS,
+        message: ADMIN_REQUIRED_MESSAGE,
       });
     }
     const existing = await this.repository.findSingleton();
@@ -75,7 +76,7 @@ export class OrganizationService {
     actor: SessionUser,
   ): Promise<Organization> {
     const organization = await this.requireOrganization();
-    this.requireManage(actor, organization);
+    this.requireManage(actor);
 
     // class-validator can't express "at least one field"; the whitelist
     // already stripped unknown keys, and TS class fields keep absent
@@ -99,10 +100,10 @@ export class OrganizationService {
     return updated;
   }
 
-  /** Hard delete; the singleton slot is freed for any PM to re-create. */
+  /** Hard delete; the singleton slot is freed for any Admin to re-create. */
   async remove(actor: SessionUser): Promise<void> {
     const organization = await this.requireOrganization();
-    this.requireManage(actor, organization);
+    this.requireManage(actor);
     await this.repository.remove(organization.id);
   }
 
@@ -114,9 +115,9 @@ export class OrganizationService {
     return organization;
   }
 
-  /** Ownership half of the ABAC check; the role half is `RolesGuard`. */
-  private requireManage(actor: SessionUser, organization: Organization): void {
-    if (!this.policy.canManage(actor, organization)) {
+  /** Admin-only half of the ABAC check; the role half is `RolesGuard`. */
+  private requireManage(actor: SessionUser): void {
+    if (!this.policy.canManage(actor)) {
       throw new ForbiddenException({
         status: NOT_ORGANIZATION_OWNER_STATUS,
         message: NOT_ORGANIZATION_OWNER_MESSAGE,

@@ -98,7 +98,7 @@ export function EmptyOrgView({ onCreate }: EmptyOrgViewProps) {
               <div>
                 <p className="font-semibold">Create your organization</p>
                 <p className="mt-0.5 text-sm text-white/75">
-                  Give it a name and claim a URL. You become its PM.
+                  Give it a name and claim a URL.
                 </p>
               </div>
             </li>
@@ -112,7 +112,7 @@ export function EmptyOrgView({ onCreate }: EmptyOrgViewProps) {
               <div>
                 <p className="font-semibold">Add your people</p>
                 <p className="mt-0.5 text-sm text-white/75">
-                  Invite teammates as PM, Admin or Dev.
+                  Invite teammates as PM, HR or Dev.
                 </p>
               </div>
             </li>
@@ -215,9 +215,8 @@ export function EmptyOrgView({ onCreate }: EmptyOrgViewProps) {
             </div>
 
             <p className="border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
-              You&apos;ll be the{' '}
-              <strong className="font-semibold text-ink">PM</strong>, with full
-              control over projects and members.
+              As the Admin, you&apos;ll have full control over the organization,
+              its members and projects.
             </p>
 
             <button
@@ -230,9 +229,8 @@ export function EmptyOrgView({ onCreate }: EmptyOrgViewProps) {
           </form>
 
           <p className="mt-5 border-t border-ink-line pt-4 text-sm text-ink-soft">
-            Only a PM can create the organization. If you&apos;re expecting an
-            invite, ask your PM to add your email, and the organization will
-            appear here.
+            Only an Admin can create the organization. If your account
+            shouldn&apos;t have the Admin role, contact whoever provisioned it.
           </p>
         </div>
       </div>

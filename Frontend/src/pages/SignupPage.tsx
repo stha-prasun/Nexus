@@ -18,10 +18,11 @@ import { ApiError, type Role, register } from '@/lib/api';
 import { setPendingEmail, startCooldown } from '@/lib/resend';
 import { useAppSelector } from '@/store/hooks';
 
+// Open signup roles — Admin is provisioned internally and never listed here.
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'PM', label: 'Project Manager' },
+  { value: 'HR', label: 'Human Resources' },
   { value: 'Dev', label: 'Developer' },
-  { value: 'Admin', label: 'Admin' },
 ];
 
 const passwordPolicyOk = (value: string): boolean =>

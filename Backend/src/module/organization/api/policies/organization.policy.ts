@@ -1,19 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import type { SessionUser } from '../../../auth/api/session/session.types';
-import type { Organization } from '../entities/organization.entity';
 
 /**
- * ABAC for organization mutations: `(PM ∧ owner) ∨ Admin`. The Admin
- * branch is break-glass so the singleton can never be orphaned when the
- * creator is deleted or demoted. Both attributes come from the Redis
- * session snapshot and the loaded row — never from the request body.
+ * ABAC for organization mutations: Admin only. PM previously managed the
+ * organization when it owned it (`createdByUserId`); that branch is gone —
+ * the row still records its creator, but it grants no rights. The role
+ * attribute comes from the Redis session snapshot, never the request body.
+ * Simplified from `(actor, organization)` while only one attribute decides
+ * the outcome (YAGNI — reintroduce the row parameter if a future rule
+ * needs it).
  */
 @Injectable()
 export class OrganizationPolicy {
-  canManage(actor: SessionUser, organization: Organization): boolean {
-    return (
-      actor.role === 'Admin' ||
-      (actor.role === 'PM' && actor.userId === organization.createdByUserId)
-    );
+  canManage(actor: SessionUser): boolean {
+    return actor.role === 'Admin';
   }
 }
