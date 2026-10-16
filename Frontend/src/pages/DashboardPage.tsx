@@ -21,6 +21,7 @@ import {
   INPUT,
   ROLES,
   SLUG_PATTERN,
+  slugify,
   toRoleKey,
 } from '@/lib/dashboard';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
@@ -43,6 +44,56 @@ function Field({
       </label>
       {children}
     </div>
+  );
+}
+
+/**
+ * Controlled body for the edit-organization dialog: the slug follows the
+ * name (via slugify) until the URL field is edited — same rule as the
+ * create form in EmptyOrgView. Inputs keep their `name` attributes so the
+ * dialog's FormData submit path is unchanged.
+ */
+function EditOrgFields({
+  initialName,
+  initialSlug,
+}: {
+  initialName: string;
+  initialSlug: string;
+}) {
+  const [name, setName] = useState(initialName);
+  const [slug, setSlug] = useState(initialSlug);
+  const [slugTouched, setSlugTouched] = useState(false);
+
+  return (
+    <>
+      <Field htmlFor="e-name" label="Name">
+        <input
+          id="e-name"
+          name="name"
+          value={name}
+          onChange={(event) => {
+            const value = event.target.value;
+            setName(value);
+            if (!slugTouched) setSlug(slugify(value));
+          }}
+          className={INPUT}
+        />
+      </Field>
+      <Field htmlFor="e-slug" label="URL">
+        <input
+          id="e-slug"
+          name="slug"
+          value={slug}
+          onChange={(event) => {
+            setSlugTouched(true);
+            setSlug(
+              event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''),
+            );
+          }}
+          className={INPUT}
+        />
+      </Field>
+    </>
   );
 }
 
@@ -217,26 +268,7 @@ export function DashboardPage() {
     const result = await ask({
       title: 'Edit organization',
       ok: 'Save changes',
-      body: (
-        <>
-          <Field htmlFor="e-name" label="Name">
-            <input
-              id="e-name"
-              name="name"
-              defaultValue={org.name}
-              className={INPUT}
-            />
-          </Field>
-          <Field htmlFor="e-slug" label="URL">
-            <input
-              id="e-slug"
-              name="slug"
-              defaultValue={org.slug}
-              className={INPUT}
-            />
-          </Field>
-        </>
-      ),
+      body: <EditOrgFields initialName={org.name} initialSlug={org.slug} />,
       validate: (data) => {
         const name = String(data.get('name') ?? '').trim();
         const slug = String(data.get('slug') ?? '');

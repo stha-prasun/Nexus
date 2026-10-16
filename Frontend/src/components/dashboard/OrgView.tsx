@@ -215,6 +215,90 @@ export function RoleSelect({
   );
 }
 
+/** Decorative placeholder card in the empty-state kanban skeleton. */
+function SkeletonCard({
+  width,
+  accent = false,
+}: {
+  width: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      className={`mb-2 border border-dashed border-ink-soft/40 bg-white/70 p-2.5 ${
+        accent ? 'border-l-4 border-l-sun' : ''
+      }`}
+    >
+      <div className={`h-1.5 ${width} bg-ink-line`} />
+      <div className="mt-2 h-1.5 w-1/3 bg-ink-line/70" />
+    </div>
+  );
+}
+
+/**
+ * Zero-projects panel (design: dashboard-no-projects.html) — copy and CTA
+ * on the left, a decorative kanban skeleton on the right.
+ */
+function EmptyProjects({
+  orgName,
+  canManage,
+  onCreateProject,
+}: {
+  orgName: string;
+  canManage: boolean;
+  onCreateProject: () => void;
+}) {
+  return (
+    <div className="grid border border-ink md:grid-cols-2">
+      <div className="flex flex-col justify-center p-6 sm:p-8">
+        <p className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+          No projects yet
+        </p>
+        <h3 className="mt-3 font-display text-3xl font-bold leading-[1.05] tracking-tight">
+          {canManage ? 'Start your first project' : 'Nothing to work on yet'}
+        </h3>
+        <p className="mt-3 max-w-sm text-sm text-ink-soft">
+          {canManage
+            ? `A project is where your team's tasks live. Create one and pick its members from ${orgName}.`
+            : 'Your PM creates projects and adds you to them. They will show up here.'}
+        </p>
+        {canManage ? (
+          <div className="mt-6">
+            <button type="button" onClick={onCreateProject} className={BTN}>
+              Create project
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <div
+        aria-hidden="true"
+        className="grid grid-cols-3 gap-3 border-t border-ink bg-paper p-5 md:border-l md:border-t-0"
+      >
+        <div>
+          <p className="mb-2 border-b border-ink-line pb-1.5 text-[10px] font-bold uppercase tracking-wider text-ink-soft/70">
+            To do
+          </p>
+          <SkeletonCard width="w-3/4" accent />
+          <SkeletonCard width="w-1/2" />
+        </div>
+        <div>
+          <p className="mb-2 border-b border-ink-line pb-1.5 text-[10px] font-bold uppercase tracking-wider text-ink-soft/70">
+            In progress
+          </p>
+          <SkeletonCard width="w-2/3" />
+        </div>
+        <div>
+          <p className="mb-2 border-b border-ink-line pb-1.5 text-[10px] font-bold uppercase tracking-wider text-ink-soft/70">
+            Done
+          </p>
+          <SkeletonCard width="w-1/2" />
+          <SkeletonCard width="w-3/4" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OrgView({
   org,
   members,
@@ -317,27 +401,31 @@ export function OrgView({
     </li>
   ));
 
-  if (canManageMembers) {
-    cells.push(
-      <li key="new-project" className="bg-white">
-        <button
-          type="button"
-          onClick={onNewProject}
-          className="flex h-full min-h-[148px] w-full flex-col items-start justify-between bg-paper p-5 text-left text-sm font-semibold text-ink-soft hover:bg-cobalt hover:text-white"
-        >
-          <span className="text-2xl leading-none">+</span>
-          New project
-        </button>
-      </li>,
-    );
-  }
-  while (cells.length % 3 !== 0) {
-    cells.push(
-      <li
-        key={`filler-${cells.length}`}
-        className="hidden bg-white lg:block"
-      />,
-    );
+  // The "+ New project" tile and row fillers belong to the populated grid;
+  // the zero-project layout is the designed EmptyProjects panel instead.
+  if (projects.length > 0) {
+    if (canManageMembers) {
+      cells.push(
+        <li key="new-project" className="bg-white">
+          <button
+            type="button"
+            onClick={onNewProject}
+            className="flex h-full min-h-[148px] w-full flex-col items-start justify-between bg-paper p-5 text-left text-sm font-semibold text-ink-soft hover:bg-cobalt hover:text-white"
+          >
+            <span className="text-2xl leading-none">+</span>
+            New project
+          </button>
+        </li>,
+      );
+    }
+    while (cells.length % 3 !== 0) {
+      cells.push(
+        <li
+          key={`filler-${cells.length}`}
+          className="hidden bg-white lg:block"
+        />,
+      );
+    }
   }
 
   return (
@@ -436,14 +524,16 @@ export function OrgView({
             {pad2(projects.length)}
           </span>
         </h2>
-        {projects.length > 0 || canManageMembers ? (
+        {projects.length === 0 ? (
+          <EmptyProjects
+            orgName={org.name}
+            canManage={canManageMembers}
+            onCreateProject={onNewProject}
+          />
+        ) : (
           <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">
             {cells}
           </ul>
-        ) : (
-          <p className="border border-dashed border-ink-line p-8 text-center text-sm text-ink-soft">
-            No projects yet. Your Admin or PM will add them here.
-          </p>
         )}
       </section>
 
