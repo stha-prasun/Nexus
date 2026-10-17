@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module';
 import { AuthModule } from './module/auth/api/auth.module';
 import { HealthModule } from './module/health/health.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
+import { MembersModule } from './members/members.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { OrganizationModule } from './module/organization/api/organization.modul
     // Global abuse control (per-IP); register/resend tighten further via @Throttle.
     ThrottlerModule.forRoot([{ name: 'default', limit: 100, ttl: 60_000 }]),
     OrganizationModule,
+    MembersModule,
   ],
   providers: [
     // Enforces ThrottlerModule limits + every @Throttle override (register
