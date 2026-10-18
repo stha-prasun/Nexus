@@ -37,6 +37,11 @@ export interface InviteMemberJobResult {
  * deletes the row — either way this job sends nothing stale). A removed,
  * already-accepted, or tokenless membership completes as `skipped`, not
  * failed, to avoid wasted delivery and retry storms.
+ *
+ * The recipient is `organization_members.email`, not a joined `users` row —
+ * an invite may target an address that has no account yet (`user_id` NULL),
+ * and that is the common case. The users join is only used (left) for the
+ * inviter's display name.
  */
 @Injectable()
 export class SendInviteProcessor {
@@ -58,6 +63,7 @@ export class SendInviteProcessor {
 
     const token = await this.redis.get(inviteMembershipKey(membershipId));
     if (token === null) {
+      this.log.info('invite skipped', { membershipId, reason: 'token_gone' });
       return { status: 'skipped' };
     }
 
@@ -66,12 +72,11 @@ export class SendInviteProcessor {
       .select({
         status: organizationMembers.status,
         invitedRole: organizationMembers.invitedRole,
-        email: users.email,
+        email: organizationMembers.email,
         orgName: organizations.name,
         inviterName: inviter.name,
       })
       .from(organizationMembers)
-      .innerJoin(users, eq(organizationMembers.userId, users.id))
       .innerJoin(
         organizations,
         eq(organizationMembers.organizationId, organizations.id),
@@ -80,11 +85,20 @@ export class SendInviteProcessor {
       .where(eq(organizationMembers.id, membershipId))
       .limit(1);
     const row = rows[0];
-    if (
-      row === undefined ||
-      row.status !== 'INVITED' ||
-      row.invitedRole === null
-    ) {
+    if (row === undefined || row.status !== 'INVITED') {
+      this.log.info('invite skipped', {
+        membershipId,
+        reason: row === undefined ? 'membership_gone' : 'not_invited',
+      });
+      return { status: 'skipped' };
+    }
+    if (row.invitedRole === null) {
+      // CHECK-violating row (INVITED ⇒ role) — sending a roleless invite is
+      // worse than skipping; surface it loudly instead.
+      this.log.error('invite skipped', {
+        membershipId,
+        reason: 'missing_invited_role',
+      });
       return { status: 'skipped' };
     }
 
