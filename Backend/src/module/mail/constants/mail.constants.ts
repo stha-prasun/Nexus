@@ -1,6 +1,7 @@
 export const QUEUE_EMAIL = 'email';
 export const JOB_SEND_VERIFICATION = 'send-verification';
 export const JOB_SEND_ACCOUNT_EXISTS = 'send-account-exists';
+export const JOB_SEND_INVITE_MEMBER = 'send-invite-member';
 
 /** Injection tokens for the BullMQ producer queue and consumer worker. */
 export const MAIL_QUEUE = 'MAIL_QUEUE';

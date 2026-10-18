@@ -2,20 +2,24 @@
  * Every role that can exist on an account — single source for the PG enum
  * (append-only), DTO validation, guards and docs. Order matters: `roleEnum`
  * is built from this array and Postgres enums only gain values, so new
- * roles must be appended to the tail. Admin is seeded later, never
- * self-registered (see REGISTERABLE_ROLES).
+ * roles must be appended to the tail.
+ *
+ * A role enters an account through exactly two paths: **invite accept**
+ * (inviter-chosen, policy-checked by the members matrix) or the **seed
+ * script** (Admin). Registration grants `DEFAULT_ROLE` and nothing else —
+ * no client-asserted role is trusted anywhere.
  */
 export const ROLES = ['PM', 'Dev', 'Admin', 'HR'] as const;
 
 export type Role = (typeof ROLES)[number];
 
 /**
- * Whitelist for the open signup role picker. Excludes `Admin`: Admin
- * accounts are provisioned internally (seed script), never self-registered.
+ * The only role registration can grant — must match the `users.role`
+ * schema default. Admin is never self-registered (seeded later), and the
+ * register DTO no longer even accepts a `role` field (unknown JSON fields
+ * are stripped by the global whitelist pipe).
  */
-export const REGISTERABLE_ROLES = ['PM', 'Dev', 'HR'] as const;
-
-export type RegisterableRole = (typeof REGISTERABLE_ROLES)[number];
+export const DEFAULT_ROLE = 'PM';
 
 /** Injection token for the bcrypt cost factor (env `BCRYPT_ROUNDS`, default 12). */
 export const BCRYPT_ROUNDS = 'BCRYPT_ROUNDS';

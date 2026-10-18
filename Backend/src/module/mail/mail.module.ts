@@ -9,6 +9,7 @@ import { DatabaseModule } from '../database/database.module';
 import { RedisModule } from '../redis/redis.module';
 import {
   JOB_SEND_ACCOUNT_EXISTS,
+  JOB_SEND_INVITE_MEMBER,
   JOB_SEND_VERIFICATION,
   MAIL_QUEUE,
   MAIL_TRANSPORT,
@@ -19,6 +20,7 @@ import {
 import { MailQueue } from './mail.queue';
 import { MailService } from './mail.service';
 import { SendAccountExistsProcessor } from './processors/send-account-exists.processor';
+import { SendInviteProcessor } from './processors/send-invite.processor';
 import { SendVerificationProcessor } from './processors/send-verification.processor';
 import { createMailTransport } from './transports/create-mail-transport';
 import type { MailTransport } from './transports/mail-transport';
@@ -47,10 +49,15 @@ const queueProvider = {
 
 const workerProvider = {
   provide: MAIL_WORKER,
-  inject: [SendVerificationProcessor, SendAccountExistsProcessor],
+  inject: [
+    SendVerificationProcessor,
+    SendAccountExistsProcessor,
+    SendInviteProcessor,
+  ],
   useFactory: (
     verification: SendVerificationProcessor,
     accountExists: SendAccountExistsProcessor,
+    invite: SendInviteProcessor,
   ): Worker =>
     new Worker(
       QUEUE_EMAIL,
@@ -60,6 +67,9 @@ const workerProvider = {
         }
         if (job.name === JOB_SEND_ACCOUNT_EXISTS) {
           return accountExists.process(job);
+        }
+        if (job.name === JOB_SEND_INVITE_MEMBER) {
+          return invite.process(job);
         }
         return undefined;
       },
@@ -93,6 +103,7 @@ class MailQueueShutdown implements OnModuleDestroy {
     MailQueue,
     SendVerificationProcessor,
     SendAccountExistsProcessor,
+    SendInviteProcessor,
   ],
   exports: [MailQueue],
 })

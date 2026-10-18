@@ -1,7 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import {
   IsEmail,
-  IsIn,
   IsString,
   IsStrongPassword,
   Matches,
@@ -9,11 +8,13 @@ import {
   MinLength,
 } from 'class-validator';
 import { NormalizeEmail, NormalizeName } from '../../../../common/decorators';
-import {
-  REGISTERABLE_ROLES,
-  type RegisterableRole,
-} from '../constants/auth.constants';
 
+/**
+ * Registration grants nothing but the account itself — there is deliberately
+ * **no `role` field** (the whitelist pipe silently strips any client-sent
+ * `role`; the factory persists `DEFAULT_ROLE`). Role enters an account only
+ * via invite accept or the seed script (§members 5.4).
+ */
 export class RegisterDto {
   @ApiProperty({ example: 'Ada Lovelace', minLength: 2, maxLength: 100 })
   @IsString()
@@ -48,17 +49,4 @@ export class RegisterDto {
     },
   )
   password!: string;
-
-  @ApiProperty({
-    enum: REGISTERABLE_ROLES,
-    example: 'Dev',
-    description:
-      'Signup role — Admin accounts are provisioned internally and rejected here.',
-  })
-  @IsString()
-  @IsIn(REGISTERABLE_ROLES, {
-    message:
-      'Choose PM, HR or Dev — Admin accounts are provisioned internally.',
-  })
-  role!: RegisterableRole;
 }

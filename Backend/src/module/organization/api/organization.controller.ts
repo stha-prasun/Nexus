@@ -28,6 +28,7 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { UnauthenticatedResponseDto } from '../../auth/api/dto/auth-responses.dto';
 import type { AuthenticatedRequest } from '../../auth/api/guards/session-auth.guard';
 import { SessionAuthGuard } from '../../auth/api/guards/session-auth.guard';
+import { ActiveMemberGuard } from '../../members/api/guards/active-member.guard';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import {
   GetOrganizationResponseDto,
@@ -48,7 +49,9 @@ export class OrganizationController {
   constructor(private readonly organizationService: OrganizationService) {}
 
   @Post()
-  @UseGuards(SessionAuthGuard, RolesGuard)
+  // ActiveMemberGuard is lenient while no org exists (the seed Admin's
+  // bootstrap path); the service still answers 409 once a row is present.
+  @UseGuards(SessionAuthGuard, RolesGuard, ActiveMemberGuard)
   @Roles('Admin')
   @Throttle({ default: { limit: 5, ttl: 600_000 } })
   @ApiOperation({
@@ -84,12 +87,16 @@ export class OrganizationController {
   @UseGuards(SessionAuthGuard)
   @ApiOperation({
     summary:
-      'Current organization, or null when none exists yet (any signed-in user)',
+      'Current organization for ACTIVE members, or null when none exists yet / the caller is not a member (any signed-in user)',
   })
   @ApiOkResponse({ type: GetOrganizationResponseDto })
   @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })
-  async find(): Promise<GetOrganizationResponseDto> {
-    const organization = await this.organizationService.find();
+  async find(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<GetOrganizationResponseDto> {
+    // No ActiveMemberGuard here — the service must answer null for
+    // non-members instead of 403 (the removed-member dashboard state).
+    const organization = await this.organizationService.find(req.user);
     return {
       organization:
         organization === null ? null : toOrganizationResponse(organization),
@@ -97,7 +104,7 @@ export class OrganizationController {
   }
 
   @Patch()
-  @UseGuards(SessionAuthGuard, RolesGuard)
+  @UseGuards(SessionAuthGuard, RolesGuard, ActiveMemberGuard)
   @Roles('Admin')
   @ApiOperation({ summary: 'Update the organization (Admin only)' })
   @ApiOkResponse({ type: OrganizationResponseDto })
@@ -129,7 +136,7 @@ export class OrganizationController {
 
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
-  @UseGuards(SessionAuthGuard, RolesGuard)
+  @UseGuards(SessionAuthGuard, RolesGuard, ActiveMemberGuard)
   @Roles('Admin')
   @ApiOperation({ summary: 'Hard-delete the organization (Admin only)' })
   @ApiNoContentResponse({ description: '204 — the organization is deleted' })

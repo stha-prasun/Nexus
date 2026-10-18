@@ -96,7 +96,6 @@ describe('AuthService', () => {
     name: 'Ada Lovelace',
     email: 'ada@example.com',
     password: 'Sup3r!Secret',
-    role: 'Dev',
   };
 
   const conflictFrom = async (

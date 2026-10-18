@@ -1,37 +1,31 @@
 import { validateSync } from 'class-validator';
-import { REGISTERABLE_ROLES, ROLES } from '../constants/auth.constants';
 import { RegisterDto } from './register.dto';
 
-describe('RegisterDto role', () => {
-  const dto = (role: unknown): RegisterDto => {
+describe('RegisterDto', () => {
+  const dto = (): RegisterDto => {
     const instance = new RegisterDto();
     instance.name = 'Ada Lovelace';
     instance.email = 'ada@example.com';
     instance.password = 'Str0ng!Pass';
-    instance.role = role as RegisterDto['role'];
     return instance;
   };
 
-  const roleErrors = (role: unknown): number =>
-    validateSync(dto(role)).filter((error) => error.property === 'role').length;
-
-  it.each(REGISTERABLE_ROLES)('accepts the registerable role %s', (role) => {
-    expect(roleErrors(role)).toBe(0);
+  it('validates with no role field present', () => {
+    expect(validateSync(dto())).toEqual([]);
   });
 
-  it("rejects 'Admin' — provisioned internally, never self-registered", () => {
-    expect(roleErrors('Admin')).toBeGreaterThan(0);
+  it('has no role property at all — a client-sent `role` is an unknown field the whitelist strips', () => {
+    expect('role' in new RegisterDto()).toBe(false);
   });
 
-  it('rejects unknown values', () => {
-    expect(roleErrors('Owner')).toBeGreaterThan(0);
-    expect(roleErrors('')).toBeGreaterThan(0);
-  });
-
-  it('REGISTERABLE_ROLES is a subset of ROLES and HR is registerable', () => {
-    for (const role of REGISTERABLE_ROLES) {
-      expect(ROLES).toContain(role);
-    }
-    expect(REGISTERABLE_ROLES).toContain('HR');
+  it('still rejects an invalid email and a weak password', () => {
+    const weak = dto();
+    weak.email = 'not-an-email';
+    weak.password = 'short';
+    const errors = validateSync(weak);
+    expect(errors.map((error) => error.property).sort()).toEqual([
+      'email',
+      'password',
+    ]);
   });
 });

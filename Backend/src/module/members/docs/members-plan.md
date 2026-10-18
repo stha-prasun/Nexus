@@ -66,6 +66,15 @@ Constraints (table config):
 - Index on `userId`, index on `status` (list filters + accept lookups).
 - `member_status` is a **new append-only PG enum**, built from an exported constant (mirrors `roleEnum` from `auth.constants.ts`).
 
+**Implemented deviation (plan bug found during implementation):** `userId` is **nullable**, not `NOT NULL` as first sketched above. The invite identity is the email — an invite can target an address that has no account yet, and the membership row must exist (and hold `invitedRole` + the Redis token) before that person signs up. `userId` is set at invite time when an account already exists, and set at accept time otherwise. The CHECK constraint was tightened accordingly:
+
+```sql
+CHECK ((status = 'INVITED' AND invited_role IS NOT NULL)
+    OR (status = 'ACTIVE' AND invited_role IS NULL AND user_id IS NOT NULL))
+```
+
+`email varchar(255) NOT NULL` (unique per org) carries the identity in the INVITED state; the `unique(organizationId, userId)` index only bites once `userId` is populated. Accept copies email → user, invitedRole → `users.role`, fills `userId`, flips status in one transaction.
+
 **State machine:**
 
 | State | Role source | Mutations |

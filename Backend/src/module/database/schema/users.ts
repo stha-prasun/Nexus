@@ -7,7 +7,7 @@ import {
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
-import { ROLES } from '../../auth/api/constants/auth.constants';
+import { DEFAULT_ROLE, ROLES } from '../../auth/api/constants/auth.constants';
 
 /**
  * `users.role` whitelist as a native Postgres enum, derived from the auth
@@ -25,7 +25,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   email: varchar('email', { length: 255 }).notNull().unique(),
   name: varchar('name', { length: 100 }).notNull(),
-  role: roleEnum('role').notNull().default('PM'),
+  role: roleEnum('role').notNull().default(DEFAULT_ROLE),
   passwordHash: text('password_hash').notNull(),
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })

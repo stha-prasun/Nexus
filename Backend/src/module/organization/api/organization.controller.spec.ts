@@ -5,6 +5,8 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import type { AuthenticatedRequest } from '../../auth/api/guards/session-auth.guard';
 import { SessionAuthGuard } from '../../auth/api/guards/session-auth.guard';
 import { SessionService } from '../../auth/api/session/session.service';
+import { ActiveMemberGuard } from '../../members/api/guards/active-member.guard';
+import { MembersRepository } from '../../members/api/repositories/members.repository';
 import { Organization } from './entities/organization.entity';
 import { OrganizationController } from './organization.controller';
 import { OrganizationService } from './organization.service';
@@ -78,8 +80,10 @@ describe('OrganizationController', () => {
       providers: [
         { provide: OrganizationService, useValue: organizationService },
         // Nest instantiates the @UseGuards classes on the controller, so
-        // SessionAuthGuard's dependency must be resolvable here.
+        // SessionAuthGuard's and ActiveMemberGuard's dependencies must be
+        // resolvable here.
         { provide: SessionService, useValue: {} },
+        { provide: MembersRepository, useValue: {} },
       ],
     }).compile();
 
@@ -91,32 +95,38 @@ describe('OrganizationController', () => {
   });
 
   describe('guard composition', () => {
-    it('POST requires session + roles (Admin) and is throttled 5/10min', () => {
+    it('POST requires session + roles (Admin) + ActiveMemberGuard and is throttled 5/10min', () => {
       const target = handler('create');
 
-      expect(guardsOf(target)).toEqual([SessionAuthGuard, RolesGuard]);
+      expect(guardsOf(target)).toEqual([
+        SessionAuthGuard,
+        RolesGuard,
+        ActiveMemberGuard,
+      ]);
       expect(rolesOf(target)).toEqual(['Admin']);
       expect(Reflect.getMetadata(THROTTLER_LIMIT_DEFAULT, target)).toBe(5);
       expect(Reflect.getMetadata(THROTTLER_TTL_DEFAULT, target)).toBe(600_000);
     });
 
-    it('GET requires session only and carries no role gate', () => {
+    it('GET requires session only — no role gate, no ActiveMemberGuard (null body instead of 403)', () => {
       const target = handler('find');
 
       expect(guardsOf(target)).toEqual([SessionAuthGuard]);
       expect(rolesOf(target)).toBeUndefined();
     });
 
-    it('PATCH and DELETE require session + roles (Admin) and DELETE answers 204', () => {
+    it('PATCH and DELETE require session + roles (Admin) + ActiveMemberGuard; DELETE answers 204', () => {
       expect(guardsOf(handler('update'))).toEqual([
         SessionAuthGuard,
         RolesGuard,
+        ActiveMemberGuard,
       ]);
       expect(rolesOf(handler('update'))).toEqual(['Admin']);
 
       expect(guardsOf(handler('remove'))).toEqual([
         SessionAuthGuard,
         RolesGuard,
+        ActiveMemberGuard,
       ]);
       expect(rolesOf(handler('remove'))).toEqual(['Admin']);
       expect(Reflect.getMetadata(HTTP_CODE_METADATA, handler('remove'))).toBe(
@@ -143,18 +153,19 @@ describe('OrganizationController', () => {
   });
 
   describe('find', () => {
-    it('wraps the organization in the response envelope', async () => {
+    it('wraps the organization in the response envelope (delegating the session user)', async () => {
       organizationService.find.mockResolvedValue(organization);
 
-      await expect(controller.find()).resolves.toEqual({
+      await expect(controller.find(request())).resolves.toEqual({
         organization: response('org-1'),
       });
+      expect(organizationService.find).toHaveBeenCalledWith(request().user);
     });
 
-    it('answers a null body when no organization exists', async () => {
+    it('answers a null body when no organization exists or the caller is not a member', async () => {
       organizationService.find.mockResolvedValue(null);
 
-      await expect(controller.find()).resolves.toEqual({
+      await expect(controller.find(request())).resolves.toEqual({
         organization: null,
       });
     });

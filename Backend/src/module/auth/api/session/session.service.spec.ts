@@ -30,6 +30,8 @@ describe('SessionService', () => {
     del: jest.fn(),
     zrange: jest.fn(),
     multi: jest.fn(() => multi),
+    pipeline: jest.fn(),
+    pttl: jest.fn(),
   };
   const log = { error: jest.fn(), info: jest.fn() };
 
@@ -269,6 +271,84 @@ describe('SessionService', () => {
         userSessionsKey(user.userId),
         'sidA',
       );
+    });
+  });
+
+  describe('updateRoleForUser', () => {
+    const sessionJson = (role: string): string =>
+      JSON.stringify({ ...user, role, createdAt: '2026-01-01T00:00:00.000Z' });
+
+    const newPipeline = () => ({
+      get: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      pttl: jest.fn().mockReturnThis(),
+      exec: jest.fn(),
+    });
+
+    it('patches the role in every live session, preserving the remaining TTL (PX)', async () => {
+      const reads = newPipeline();
+      const ttls = newPipeline();
+      const writes = newPipeline();
+      redis.pipeline
+        .mockReturnValueOnce(reads)
+        .mockReturnValueOnce(ttls)
+        .mockReturnValueOnce(writes);
+      redis.zrange.mockResolvedValue(['sidA']);
+      reads.exec.mockResolvedValue([[null, sessionJson('PM')]]);
+      ttls.exec.mockResolvedValue([[null, 5_000]]);
+      writes.exec.mockResolvedValue([['OK']]);
+
+      await service.updateRoleForUser(user.userId, 'Admin');
+
+      expect(redis.zrange).toHaveBeenCalledWith(
+        userSessionsKey(user.userId),
+        0,
+        '-1',
+      );
+      expect(reads.get).toHaveBeenCalledWith(sessionKey('sidA'));
+      expect(writes.set).toHaveBeenCalledWith(
+        sessionKey('sidA'),
+        expect.stringContaining('"role":"Admin"'),
+        'PX',
+        5_000,
+      );
+    });
+
+    it('skips sessions already at the role, vanished keys and corrupt payloads', async () => {
+      const reads = newPipeline();
+      const ttls = newPipeline();
+      const writes = newPipeline();
+      redis.pipeline
+        .mockReturnValueOnce(reads)
+        .mockReturnValueOnce(ttls)
+        .mockReturnValueOnce(writes);
+      redis.zrange.mockResolvedValue(['fresh', 'gone', 'corrupt']);
+      reads.exec.mockResolvedValue([
+        [null, sessionJson('Admin')], // already fresh — no write
+        [null, sessionJson('PM')], // will prove vanished via pttl -2
+        [null, '{not-json'],
+      ]);
+      ttls.exec.mockResolvedValue([[null, -2]]);
+      writes.exec.mockResolvedValue([]);
+
+      await service.updateRoleForUser(user.userId, 'Admin');
+
+      // Only the stale, still-live session reached the PTTL stage…
+      expect(ttls.pttl).toHaveBeenCalledTimes(1);
+      // …but it vanished before SET — nothing was written.
+      expect(writes.set).not.toHaveBeenCalled();
+      expect(log.error).toHaveBeenCalledWith(
+        'session role update: corrupt payload skipped',
+        { sid: 'corrupt' },
+      );
+    });
+
+    it('is a no-op when the user has no indexed sessions', async () => {
+      redis.zrange.mockResolvedValue([]);
+
+      await service.updateRoleForUser(user.userId, 'Admin');
+
+      expect(redis.pipeline).not.toHaveBeenCalled();
     });
   });
 

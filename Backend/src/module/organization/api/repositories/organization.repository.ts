@@ -2,7 +2,11 @@ import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { DRIZZLE } from '../../../database/constants/database.contants';
 import type { Database } from '../../../database/interfaces/database.interfaces';
-import { organizations } from '../../../database/schema';
+import {
+  organizationMembers,
+  organizations,
+  users,
+} from '../../../database/schema';
 import {
   ORGANIZATION_EXISTS_MESSAGE,
   ORGANIZATION_EXISTS_STATUS,
@@ -44,20 +48,61 @@ export class OrganizationRepository {
     return row ? toEntity(row) : null;
   }
 
-  async insert(organization: Organization): Promise<Organization> {
+  /**
+   * Insert the org **and** the creator's ACTIVE Admin membership in one
+   * transaction (§members 5.3) — otherwise no Admin could ever manage
+   * members, since every management path requires ACTIVE membership. The
+   * creator's role is copied from `users.role` (Admin via seed), read fresh
+   * inside the transaction. The unique violation caught here is the race
+   * path — a concurrent create won the INSERT between the service's
+   * pre-check and this write — and maps to the same 409 the pre-check
+   * answers. Either both rows land or neither does.
+   */
+  async insertWithMembership(
+    organization: Organization,
+    creatorUserId: string,
+  ): Promise<Organization> {
     try {
-      const rows = await this.db
-        .insert(organizations)
-        .values({
-          id: organization.id,
-          name: organization.name,
-          slug: organization.slug,
-          createdByUserId: organization.createdByUserId,
-          createdAt: organization.createdAt,
-          updatedAt: organization.updatedAt,
-        })
-        .returning();
-      return toEntity(rows[0]);
+      return await this.db.transaction(async (tx) => {
+        const inserted = await tx
+          .insert(organizations)
+          .values({
+            id: organization.id,
+            name: organization.name,
+            slug: organization.slug,
+            createdByUserId: organization.createdByUserId,
+            createdAt: organization.createdAt,
+            updatedAt: organization.updatedAt,
+          })
+          .returning();
+        const row = inserted[0];
+
+        // Role copied from users.role (seed Admin) — never from the session
+        // snapshot, so the membership reflects the durable account state.
+        const creators = await tx
+          .select({ email: users.email, role: users.role })
+          .from(users)
+          .where(eq(users.id, creatorUserId))
+          .limit(1);
+        const creator = creators[0];
+        if (creator === undefined) {
+          throw new Error(
+            `org creator ${creatorUserId} vanished before membership bootstrap`,
+          );
+        }
+
+        await tx.insert(organizationMembers).values({
+          organizationId: row.id,
+          userId: creatorUserId,
+          email: creator.email,
+          status: 'ACTIVE',
+          invitedRole: null,
+          invitedByUserId: null,
+          acceptedAt: new Date(),
+        });
+
+        return toEntity(row);
+      });
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
       throw new ConflictException({

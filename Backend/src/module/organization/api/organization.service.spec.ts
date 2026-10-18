@@ -1,10 +1,9 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import {
-  REGISTERABLE_ROLES,
-  ROLES,
-} from '../../auth/api/constants/auth.constants';
+import { ROLES } from '../../auth/api/constants/auth.constants';
 import type { SessionUser } from '../../auth/api/session/session.types';
+import { NOT_ACTIVE_MEMBER_MESSAGE } from '../../members/api/constants/members.constants';
+import { MembersRepository } from '../../members/api/repositories/members.repository';
 import {
   ADMIN_REQUIRED_MESSAGE,
   EMPTY_UPDATE_MESSAGE,
@@ -25,12 +24,22 @@ describe('OrganizationService', () => {
 
   const repository = {
     findSingleton: jest.fn<Promise<Organization | null>, []>(),
-    insert: jest.fn<Promise<Organization>, [Organization]>(),
+    insertWithMembership: jest.fn<
+      Promise<Organization>,
+      [Organization, string]
+    >(),
     update: jest.fn<
       Promise<Organization | null>,
       [string, { name?: string; slug?: string }]
     >(),
     remove: jest.fn<Promise<void>, [string]>(),
+  };
+
+  const membersRepository = {
+    findActiveMembershipOrg: jest.fn<
+      Promise<{ id: string; name: string } | null>,
+      [string]
+    >(),
   };
 
   const OWNER_ID = 'user-owner';
@@ -90,6 +99,12 @@ describe('OrganizationService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // Default: every actor holds an ACTIVE membership (individual tests
+    // override this to exercise the gating).
+    membersRepository.findActiveMembershipOrg.mockResolvedValue({
+      id: 'org-1',
+      name: 'Acme Inc',
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -98,6 +113,7 @@ describe('OrganizationService', () => {
         OrganizationFactory,
         OrganizationPolicy,
         { provide: OrganizationRepository, useValue: repository },
+        { provide: MembersRepository, useValue: membersRepository },
       ],
     }).compile();
 
@@ -109,22 +125,25 @@ describe('OrganizationService', () => {
   });
 
   describe('create', () => {
-    it('inserts the factory-built entity and returns it (creator recorded)', async () => {
+    it('inserts the factory-built entity with the creator id (bootstrap membership) and returns it', async () => {
       repository.findSingleton.mockResolvedValue(null);
       const dto = createDto();
       dto.slug = ' ACME-Inc '; // factory normalizes even a pre-cleaned DTO
       const inserted = organization();
-      repository.insert.mockResolvedValue(inserted);
+      repository.insertWithMembership.mockResolvedValue(inserted);
 
       const result = await service.create(dto, admin);
 
       expect(result).toBe(inserted);
-      const built = repository.insert.mock.calls[0][0];
+      const [built, creatorUserId] = repository.insertWithMembership.mock
+        .calls[0] as [Organization, string];
       expect(built.id).toEqual(expect.any(String));
       expect(built.name).toBe('Acme Inc');
       expect(built.slug).toBe('acme-inc');
       expect(built.createdByUserId).toBe(admin.userId);
       expect(built.createdAt).toBe(built.updatedAt);
+      // The membership is bootstrapped for the creator in the same tx.
+      expect(creatorUserId).toBe(admin.userId);
     });
 
     it('409 organization_exists when a row already exists', async () => {
@@ -137,7 +156,7 @@ describe('OrganizationService', () => {
           message: ORGANIZATION_EXISTS_MESSAGE,
         },
       });
-      expect(repository.insert).not.toHaveBeenCalled();
+      expect(repository.insertWithMembership).not.toHaveBeenCalled();
     });
 
     it('propagates the repository 409 for the concurrent-create race (23505)', async () => {
@@ -146,7 +165,7 @@ describe('OrganizationService', () => {
         status: 'organization_exists',
         message: ORGANIZATION_EXISTS_MESSAGE,
       });
-      repository.insert.mockRejectedValue(conflict);
+      repository.insertWithMembership.mockRejectedValue(conflict);
 
       await expect(service.create(createDto(), admin)).rejects.toBe(conflict);
     });
@@ -171,17 +190,32 @@ describe('OrganizationService', () => {
   });
 
   describe('find', () => {
-    it('returns the singleton row', async () => {
+    it('returns the singleton row for an ACTIVE member', async () => {
       const existing = organization();
       repository.findSingleton.mockResolvedValue(existing);
+      membersRepository.findActiveMembershipOrg.mockResolvedValue({
+        id: 'org-1',
+        name: 'Acme Inc',
+      });
 
-      await expect(service.find()).resolves.toBe(existing);
+      await expect(service.find(admin)).resolves.toBe(existing);
+      expect(membersRepository.findActiveMembershipOrg).toHaveBeenCalledWith(
+        admin.userId,
+      );
     });
 
-    it('returns null when no organization exists', async () => {
+    it('returns null when no organization exists (membership never consulted)', async () => {
       repository.findSingleton.mockResolvedValue(null);
 
-      await expect(service.find()).resolves.toBeNull();
+      await expect(service.find(admin)).resolves.toBeNull();
+      expect(membersRepository.findActiveMembershipOrg).not.toHaveBeenCalled();
+    });
+
+    it('returns null for a signed-in user without an ACTIVE membership (removed member)', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+      membersRepository.findActiveMembershipOrg.mockResolvedValue(null);
+
+      await expect(service.find(dev)).resolves.toBeNull();
     });
   });
 
@@ -288,6 +322,22 @@ describe('OrganizationService', () => {
         service.update(updateDto({ name: 'Acme' }), admin),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('403 not_active_member for an Admin without an ACTIVE membership (stale role)', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+      membersRepository.findActiveMembershipOrg.mockResolvedValue(null);
+
+      await expect(
+        service.update(updateDto({ name: 'Nope' }), admin),
+      ).rejects.toMatchObject({
+        status: 403,
+        response: {
+          status: 'not_active_member',
+          message: NOT_ACTIVE_MEMBER_MESSAGE,
+        },
+      });
+      expect(repository.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('remove', () => {
@@ -330,17 +380,23 @@ describe('OrganizationService', () => {
         response: { status: 'organization_not_found' },
       });
     });
+
+    it('403 not_active_member for an Admin without an ACTIVE membership (stale role)', async () => {
+      repository.findSingleton.mockResolvedValue(organization());
+      membersRepository.findActiveMembershipOrg.mockResolvedValue(null);
+
+      await expect(service.remove(admin)).rejects.toMatchObject({
+        status: 403,
+        response: { status: 'not_active_member' },
+      });
+      expect(repository.remove).not.toHaveBeenCalled();
+    });
   });
 
   describe('role constants consistency', () => {
-    it("REGISTERABLE_ROLES ⊂ ROLES, 'HR' ∈ ROLES, and Admin is not registerable", () => {
-      for (const role of REGISTERABLE_ROLES) {
-        expect(ROLES).toContain(role);
-      }
+    it("'HR' and 'Admin' are in ROLES (append-only domain)", () => {
       expect(ROLES).toContain('HR');
-      expect(REGISTERABLE_ROLES).not.toContain(
-        'Admin' as (typeof REGISTERABLE_ROLES)[number],
-      );
+      expect(ROLES).toContain('Admin');
     });
   });
 });

@@ -43,6 +43,13 @@
       "when": 1792126505645,
       "tag": "0005_curved_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1792252434302,
+      "tag": "0006_low_thundra",
+      "breakpoints": true
     }
   ]
 }

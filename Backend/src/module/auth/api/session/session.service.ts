@@ -4,6 +4,7 @@ import type { CookieOptions, Response } from 'express';
 import type { Redis } from 'ioredis';
 import { AppLogger } from '../../../../common/logger/logger';
 import { REDIS_CLIENT } from '../../../redis/constants/redis.constants';
+import type { Role } from '../constants/auth.constants';
 import {
   SESSION_COOKIE_NAME,
   SESSION_TTL_SECONDS,
@@ -130,6 +131,82 @@ export class SessionService {
     return results
       .slice(0, sids.length)
       .reduce((sum, tuple) => sum + this.tupleNumber(tuple), 0);
+  }
+
+  /**
+   * Patch `role` in every live session snapshot for a user — used after an
+   * invite accept (the caller's snapshot still carries the register-default
+   * role) and after a role change (the target's sessions must never serve a
+   * stale role to `RolesGuard`). Each session keeps its original remaining
+   * TTL, so "remember me" is not shortened. Best-effort: read/parse/write
+   * failures are logged and the rest continue; a session that vanishes
+   * between GET and SET is skipped. Redis outages propagate (like other
+   * session writes) — a 500 here is honest, a silently stale role is not.
+   */
+  async updateRoleForUser(userId: string, role: Role): Promise<void> {
+    const indexKey = userSessionsKey(userId);
+    const sids = await this.redis.zrange(indexKey, 0, '-1');
+    if (sids.length === 0) return;
+
+    const reads = this.redis.pipeline();
+    for (const sid of sids) reads.get(sessionKey(sid));
+    const readResults = await reads.exec();
+    if (readResults === null) {
+      this.log.error('session role update: no EXEC result', { userId });
+      return;
+    }
+
+    const stale: { sid: string; data: SessionData }[] = [];
+    for (let i = 0; i < sids.length; i += 1) {
+      const tuple = readResults[i];
+      if (tuple === undefined || tuple[0] !== null) continue;
+      const raw = tuple[1];
+      if (typeof raw !== 'string') continue;
+      try {
+        const data = JSON.parse(raw) as SessionData;
+        if (data.role !== role) stale.push({ sid: sids[i], data });
+      } catch {
+        // Corrupt payloads are SessionAuthGuard's miss, not ours to repair.
+        this.log.error('session role update: corrupt payload skipped', {
+          sid: sids[i],
+        });
+      }
+    }
+    if (stale.length === 0) return;
+
+    const ttls = this.redis.pipeline();
+    for (const { sid } of stale) ttls.pttl(sessionKey(sid));
+    const ttlResults = await ttls.exec();
+    if (ttlResults === null) {
+      this.log.error('session role update: no EXEC result (pttl)', {
+        userId,
+      });
+      return;
+    }
+
+    const writes = this.redis.pipeline();
+    let queued = 0;
+    for (let i = 0; i < stale.length; i += 1) {
+      const { sid, data } = stale[i];
+      const tuple = ttlResults[i];
+      if (tuple === undefined || tuple[0] !== null) continue;
+      const pttl = typeof tuple[1] === 'number' ? tuple[1] : -2;
+      if (pttl === -2) continue; // vanished between GET and SET
+      const key = sessionKey(sid);
+      const patched = JSON.stringify({ ...data, role });
+      if (pttl === -1) {
+        // No expiry on this key (impossible by construction, but a plain SET
+        // preserves it instead of inventing a TTL).
+        writes.set(key, patched);
+      } else {
+        writes.set(key, patched, 'PX', pttl);
+      }
+      queued += 1;
+    }
+    if (queued === 0) return;
+
+    const results = await writes.exec();
+    this.applied(results, `session role update (${queued})`);
   }
 
   /** Cookie flags: httpOnly, sameSite, secure (env), path=/. */

@@ -1,4 +1,5 @@
 import * as bcrypt from 'bcrypt';
+import { DEFAULT_ROLE } from '../constants/auth.constants';
 import type { RegisterDto } from '../dto/register.dto';
 import { UserFactory } from './user.factory';
 
@@ -13,7 +14,6 @@ describe('UserFactory', () => {
     name: 'Ada Lovelace',
     email: 'ada@example.com',
     password: 'Sup3r!Secret',
-    role: 'Dev',
   };
 
   beforeEach(() => {
@@ -29,7 +29,7 @@ describe('UserFactory', () => {
     expect(mockedHash).toHaveBeenCalledWith('Sup3r!Secret', 12);
   });
 
-  it('constructs a User from the DTO values', async () => {
+  it('constructs a User from the DTO values with the default role', async () => {
     const factory = new UserFactory(10);
 
     const user = await factory.create(dto);
@@ -37,10 +37,20 @@ describe('UserFactory', () => {
     expect(user.id).toBeUndefined();
     expect(user.name).toBe('Ada Lovelace');
     expect(user.email).toBe('ada@example.com');
-    expect(user.role).toBe('Dev');
+    // Registration never grants a role — DEFAULT_ROLE only (§members 5.4).
+    expect(user.role).toBe(DEFAULT_ROLE);
     expect(user.passwordHash).toBe('$2b$12$hashvalue');
     expect(user.isVerified).toBe(false);
     expect(user.createdAt).toBeInstanceOf(Date);
+  });
+
+  it('ignores a smuggled `role` on the dto — the factory always yields DEFAULT_ROLE', async () => {
+    const factory = new UserFactory(12);
+    const smuggled = { ...dto, role: 'Admin' } as unknown as RegisterDto;
+
+    const user = await factory.create(smuggled);
+
+    expect(user.role).toBe(DEFAULT_ROLE);
   });
 
   it('does not re-normalize input (pipe already did)', async () => {
