@@ -7,7 +7,14 @@ import {
 } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
-import { ApiError, register } from '@/lib/api';
+import {
+  ApiError,
+  getInvitePreview,
+  type InvitePreview,
+  register,
+} from '@/lib/api';
+import { ROLES, toRoleKey } from '@/lib/dashboard';
+import { peekInviteToken } from '@/lib/invite';
 import { setPendingEmail, startCooldown } from '@/lib/resend';
 import { useAppSelector } from '@/store/hooks';
 
@@ -45,6 +52,8 @@ export function SignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [graphActive, setGraphActive] = useState(false);
   const [strength, setStrength] = useState(0);
+  /** Pending invite this signup is finishing — prefills the email field. */
+  const [invite, setInvite] = useState<InvitePreview | null>(null);
 
   const panelRef = useRef<HTMLElement>(null);
   const fullnameRef = useRef<HTMLInputElement>(null);
@@ -57,6 +66,27 @@ export function SignupPage() {
     document.title = 'Create your account · Nexus';
     return () => {
       document.title = previousTitle;
+    };
+  }, []);
+
+  // Arriving from an invite link → resolve the token and lock the invited
+  // email into the field (still editable). A dead token is just ignored.
+  useEffect(() => {
+    const token = peekInviteToken();
+    if (!token) return;
+    let cancelled = false;
+    void getInvitePreview(token)
+      .then((preview) => {
+        if (cancelled) return;
+        setInvite(preview);
+        const field = emailRef.current;
+        if (field && !field.value) field.value = preview.email;
+      })
+      .catch(() => {
+        // Expired/flushed token — plain signup, no error noise.
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -187,9 +217,22 @@ export function SignupPage() {
           >
             Create your account
           </h1>
-          <p className="mt-1.5 text-[15px] text-ink-soft [@media(max-height:700px)]:hidden">
-            {"Start organizing your team's work."}
-          </p>
+          {invite ? (
+            <p className="mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 border-l-2 border-cobalt bg-paper px-3 py-2 text-[13px] text-ink-soft">
+              You&apos;ve been invited to join
+              <strong className="text-ink">{invite.orgName}</strong>as
+              <span
+                className={`inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[toRoleKey(invite.role)].cls}`}
+              >
+                {ROLES[toRoleKey(invite.role)].label}
+              </span>
+              — confirm your email to join.
+            </p>
+          ) : (
+            <p className="mt-1.5 text-[15px] text-ink-soft [@media(max-height:700px)]:hidden">
+              {"Start organizing your team's work."}
+            </p>
+          )}
 
           <form
             id="login-form"

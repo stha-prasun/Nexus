@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Member, Org, Project, RoleKey } from '@/lib/dashboard';
-import { BTN, initials, pad2, ROLE_ORDER, ROLES, tint } from '@/lib/dashboard';
+import {
+  accessSummary,
+  BTN,
+  canManageMember,
+  initials,
+  pad2,
+  ROLE_ORDER,
+  ROLES,
+  tint,
+} from '@/lib/dashboard';
 import { HubGraph } from './HubGraph';
 import { CheckIcon, ChevronDownIcon, WarningIcon } from './Icons';
 
@@ -55,15 +64,10 @@ export function RoleBadge({ role }: { role: RoleKey }) {
 }
 
 /**
- * Custom listbox for picking a role: bordered button showing the colored
+ * Custom listbox for picking a role: bordered trigger showing the colored
  * role chip + chevron, opening a styled option list (badges, descriptions,
- * checkmark). Keeps its own selection so it works inside dialogs (FormData
- * reads the hidden input) and reports changes via onChange.
- *
- * The list is full trigger width (min 16rem). Inside a <dialog> it opens
- * toward the roomier side and is capped to that space, so it never pushes
- * past the dialog's `overflow-y-auto` box — that used to spawn a scrollbar
- * in the dialog while covering only part of the field.
+ * checkmark) downward — matches the dialog's border-2 + hard-shadow weight.
+ * Keeps its own selection so it works anywhere; reports changes via onChange.
  */
 export function RoleSelect({
   value,
@@ -72,6 +76,7 @@ export function RoleSelect({
   onChange,
   description = false,
   className = '',
+  allowed,
 }: {
   value: RoleKey;
   name?: string;
@@ -79,14 +84,14 @@ export function RoleSelect({
   onChange?: (role: RoleKey) => void;
   description?: boolean;
   className?: string;
+  /** Restrict the listbox to these roles; omit for all. */
+  allowed?: RoleKey[];
 }) {
   const [selected, setSelected] = useState<RoleKey>(value);
   const [open, setOpen] = useState(false);
-  const [menuBox, setMenuBox] = useState<{ up: boolean; maxHeight?: number }>({
-    up: false,
-  });
   const containerRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const options = allowed ?? ROLE_ORDER;
 
   useEffect(() => setSelected(value), [value]);
 
@@ -117,44 +122,25 @@ export function RoleSelect({
     setOpen(false);
   };
 
-  const toggleOpen = (): void => {
-    if (open) {
-      setOpen(false);
-      return;
-    }
-    const trigger = triggerRef.current;
-    const dialog = trigger?.closest('dialog');
-    if (trigger && dialog) {
-      const t = trigger.getBoundingClientRect();
-      const d = dialog.getBoundingClientRect();
-      const above = t.top - d.top - 8;
-      const below = d.bottom - t.bottom - 8;
-      const up = above >= below;
-      setMenuBox({ up, maxHeight: Math.max(96, up ? above : below) });
-    } else {
-      setMenuBox({ up: false });
-    }
-    setOpen(true);
-  };
-
   return (
     <div className={className}>
       <div ref={containerRef} className="relative flex">
         <button
-          ref={triggerRef}
           type="button"
-          onClick={toggleOpen}
+          onClick={() => setOpen(!open)}
           aria-haspopup="listbox"
           aria-expanded={open}
           aria-label={ariaLabel}
-          className="flex w-full cursor-pointer items-center justify-between gap-2 border border-ink bg-white px-2 py-1.5 outline-none transition hover:bg-paper focus-visible:border-cobalt focus-visible:ring-2 focus-visible:ring-cobalt/25"
+          className={`flex w-full cursor-pointer items-center justify-between gap-2 border bg-white px-2 py-1.5 outline-none transition ${
+            open
+              ? 'border-cobalt ring-2 ring-cobalt/25'
+              : 'border-ink hover:bg-paper focus-visible:border-cobalt focus-visible:ring-2 focus-visible:ring-cobalt/25'
+          }`}
         >
           <span className="flex min-w-0 items-center gap-1.5">
             <span
-              className={`h-2.5 w-2.5 shrink-0 ${ROLES[selected].dot}`}
-              aria-hidden="true"
-            />
-            <span className="truncate text-[13px] font-semibold text-ink">
+              className={`inline-block shrink-0 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[selected].cls}`}
+            >
               {ROLES[selected].label}
             </span>
           </span>
@@ -169,24 +155,19 @@ export function RoleSelect({
           <div
             role="listbox"
             aria-label={ariaLabel}
-            style={
-              menuBox.maxHeight === undefined
-                ? undefined
-                : { maxHeight: menuBox.maxHeight }
-            }
-            className={`absolute left-0 z-30 w-full min-w-64 overflow-y-auto border border-ink bg-white shadow-[6px_6px_0_#14183A] ${
-              menuBox.up ? 'bottom-[calc(100%+4px)]' : 'top-[calc(100%+4px)]'
-            }`}
+            className="animate-in fade-in zoom-in-95 duration-100 origin-top-left absolute left-0 top-[calc(100%+4px)] z-30 max-h-64 w-full min-w-64 overflow-y-auto border-2 border-ink bg-white shadow-[8px_8px_0_#14183A]"
           >
-            {ROLE_ORDER.map((key) => (
+            {options.map((key) => (
               <button
                 key={key}
                 type="button"
                 role="option"
                 aria-selected={selected === key}
                 onClick={() => select(key)}
-                className={`flex w-full items-center gap-2.5 border-b border-ink-line px-3 py-2.5 text-left last:border-b-0 hover:bg-paper ${
-                  selected === key ? 'bg-paper/70' : ''
+                className={`flex w-full items-center gap-2.5 border-b border-l-4 border-b-ink-line py-2.5 pl-2.5 pr-3 text-left transition last:border-b-0 ${
+                  selected === key
+                    ? 'border-l-cobalt bg-cobalt/5'
+                    : 'border-l-transparent hover:bg-paper'
                 }`}
               >
                 <span
@@ -214,6 +195,68 @@ export function RoleSelect({
         <input type="hidden" name={name} value={selected} readOnly />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Always-visible role picker for dialogs: a grid of radio-card tiles
+ * (badge + descriptor). No popup — native radios named `role` submit
+ * through FormData. Filter with `roles` (invite dialog passes the
+ * actor's invitable set).
+ */
+export function RolePicker({
+  roles,
+  name = 'role',
+  defaultValue = 'dev',
+}: {
+  roles: RoleKey[];
+  name?: string;
+  defaultValue?: RoleKey;
+}) {
+  const fallback = roles.includes(defaultValue)
+    ? defaultValue
+    : (roles[0] ?? 'dev');
+  const [picked, setPicked] = useState<RoleKey>(fallback);
+
+  return (
+    <fieldset className="grid grid-cols-2 gap-2">
+      <legend className="sr-only">Role</legend>
+      {roles.map((key) => {
+        const isSelected = picked === key;
+        return (
+          <label
+            key={key}
+            className={`flex cursor-pointer flex-col gap-1.5 border-2 p-3 transition ${
+              isSelected
+                ? 'border-cobalt bg-cobalt/5 shadow-[3px_3px_0_#1f2fe0]'
+                : 'border-ink/25 bg-white hover:border-ink hover:bg-paper'
+            }`}
+          >
+            <input
+              type="radio"
+              name={name}
+              value={key}
+              checked={isSelected}
+              onChange={() => setPicked(key)}
+              className="sr-only"
+            />
+            <span className="flex items-center justify-between gap-2">
+              <span
+                className={`inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[key].cls}`}
+              >
+                {ROLES[key].label}
+              </span>
+              {isSelected ? (
+                <CheckIcon className="h-4 w-4 shrink-0 text-cobalt" />
+              ) : null}
+            </span>
+            <span className="text-xs leading-snug text-ink-soft">
+              {ROLES[key].desc}
+            </span>
+          </label>
+        );
+      })}
+    </fieldset>
   );
 }
 
@@ -320,17 +363,20 @@ export function OrgView({
   const rows = members.map((member, i) => {
     const isMe = myEmail !== undefined && member.email === myEmail;
     const role = isMe ? viewAs : member.role;
-    const roleCell =
-      canManageMembers && !isMe ? (
-        <RoleSelect
-          value={member.role}
-          ariaLabel={`Role for ${member.name}`}
-          onChange={(role) => onRoleChange(i, role)}
-          className="min-w-[110px]"
-        />
-      ) : (
-        <RoleBadge role={role} />
-      );
+    // Per-row §1.1 matrix: HR can't touch Admin/HR rows, PM only Dev, nobody
+    // touches their own row — the server 403s the same set.
+    const manageable =
+      canManageMembers && !isMe && canManageMember(viewAs, member.role);
+    const roleCell = manageable ? (
+      <RoleSelect
+        value={member.role}
+        ariaLabel={`Role for ${member.name}`}
+        onChange={(role) => onRoleChange(i, role)}
+        className="min-w-[110px]"
+      />
+    ) : (
+      <RoleBadge role={role} />
+    );
     const status = member.invited ? (
       <>
         <span className="inline-block h-2 w-2 border border-ink-soft" /> Invited
@@ -363,7 +409,7 @@ export function OrgView({
           {status}
         </span>
         <div className="hidden text-right sm:block">
-          {canManageMembers && !isMe ? (
+          {manageable ? (
             <button
               type="button"
               onClick={() => onRemoveMember(i)}
@@ -505,6 +551,11 @@ export function OrgView({
             </button>
           ) : null}
         </div>
+        {canManageMembers ? (
+          <p className="mb-3 text-[13px] text-ink-soft">
+            {accessSummary(viewAs)}
+          </p>
+        ) : null}
         <div className="border border-ink">
           <div className="hidden grid-cols-[minmax(0,2fr)_minmax(0,2fr)_120px_100px_72px] gap-x-4 border-b border-ink bg-paper px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft sm:grid">
             <span>Member</span>

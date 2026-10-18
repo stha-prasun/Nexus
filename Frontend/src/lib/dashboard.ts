@@ -10,35 +10,81 @@ export const toApiRole = (key: RoleKey): Role => key.toUpperCase() as Role;
 
 export const ROLES: Record<
   RoleKey,
-  { label: string; cls: string; dot: string; desc: string }
+  { label: string; cls: string; desc: string }
 > = {
   pm: {
     label: 'PM',
     cls: 'bg-cobalt text-white',
-    dot: 'bg-cobalt',
     desc: 'Creates and manages projects and its members.',
   },
   admin: {
     label: 'Admin',
     cls: 'bg-sun text-ink',
-    dot: 'bg-sun',
     desc: 'Creates, edits and deletes the organization.',
   },
   hr: {
     label: 'HR',
     cls: 'bg-mist text-ink',
-    dot: 'bg-ink-soft',
     desc: 'Handles people operations and member invitations.',
   },
   dev: {
     label: 'Dev',
     cls: 'border border-ink text-ink',
-    dot: 'bg-ink',
     desc: "Works on tasks in the projects they're added to.",
   },
 };
 
 export const ROLE_ORDER: RoleKey[] = ['pm', 'hr', 'dev', 'admin'];
+
+/**
+ * Client mirror of the server's membership matrix (backend
+ * `members.policy.ts`) — the UI hides what the API would 403. The server
+ * stays the authority; this only shapes which controls render.
+ */
+export const canInviteRole = (actor: RoleKey, role: RoleKey): boolean => {
+  switch (actor) {
+    case 'admin':
+      return true;
+    case 'hr':
+      return role === 'pm' || role === 'dev' || role === 'hr';
+    case 'pm':
+      return role === 'pm' || role === 'dev';
+    default:
+      return false;
+  }
+};
+
+/** Role-change and removal — same rules; checked against the target's current role. */
+export const canManageMember = (actor: RoleKey, target: RoleKey): boolean => {
+  switch (actor) {
+    case 'admin':
+      return true;
+    case 'hr':
+      return target === 'pm' || target === 'dev';
+    case 'pm':
+      return target === 'dev';
+    default:
+      return false;
+  }
+};
+
+/** Roles the actor may put in an invite (drives the picker's options). */
+export const invitableRoles = (actor: RoleKey): RoleKey[] =>
+  ROLE_ORDER.filter((role) => canInviteRole(actor, role));
+
+/** Plain-language summary of the actor's own access — rendered under "People". */
+export const accessSummary = (actor: RoleKey): string => {
+  switch (actor) {
+    case 'admin':
+      return 'You can invite anyone and manage every member.';
+    case 'hr':
+      return 'You can invite PM, Dev and HR members — and manage PM and Dev members.';
+    case 'pm':
+      return 'You can invite PM and Dev members — and manage Dev members.';
+    default:
+      return '';
+  }
+};
 
 export interface Member {
   name: string;

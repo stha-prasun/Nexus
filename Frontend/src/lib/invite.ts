@@ -29,3 +29,10 @@ export function peekInviteReturn(): string | null {
   const value = sessionStorage.getItem(KEY);
   return isInvitePath(value) ? value : null;
 }
+
+/** Token from the pending invite path, if any — for the signup prefill. */
+export function peekInviteToken(): string | null {
+  const path = peekInviteReturn();
+  if (path === null) return null;
+  return new URLSearchParams(path.split('?')[1] ?? '').get('token');
+}

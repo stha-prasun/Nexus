@@ -4,7 +4,7 @@ import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
 import { NoOrgView } from '@/components/dashboard/NoOrgView';
-import { OrgView, RoleSelect } from '@/components/dashboard/OrgView';
+import { OrgView, RolePicker } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
 import {
   ApiError,
@@ -18,11 +18,13 @@ import {
 } from '@/lib/api';
 import type { DashboardState, Member, Org, RoleKey } from '@/lib/dashboard';
 import {
+  accessSummary,
   CURRENT_USER,
   createDemoState,
   displayMember,
   EMAIL_PATTERN,
   INPUT,
+  invitableRoles,
   ROLES,
   SLUG_PATTERN,
   slugify,
@@ -191,6 +193,8 @@ export function DashboardPage() {
   const bumpGraph = (): void => setViewKey((key) => key + 1);
 
   const handleAddMember = async (): Promise<void> => {
+    // §1.1 matrix: the picker only offers roles this actor may invite.
+    const allowed = invitableRoles(roleKey);
     const result = await ask({
       title: 'Add a member',
       ok: 'Add member',
@@ -207,13 +211,10 @@ export function DashboardPage() {
           </Field>
           <div>
             <span className="mb-1.5 block font-semibold text-ink">Role</span>
-            <RoleSelect
-              value="dev"
-              name="role"
-              ariaLabel="Role"
-              description
-              className="w-full"
-            />
+            <RolePicker roles={allowed} />
+            <p className="mt-2 text-[13px] text-ink-soft">
+              {accessSummary(roleKey)}
+            </p>
           </div>
         </>
       ),
@@ -224,6 +225,8 @@ export function DashboardPage() {
         if (!EMAIL_PATTERN.test(email)) return 'Enter a valid email address.';
         if (displayMembers.some((member) => member.email === email))
           return 'That person is already a member.';
+        const role = String(data.get('role') ?? '') as RoleKey;
+        if (!allowed.includes(role)) return 'You cannot invite that role.';
         return '';
       },
     });
