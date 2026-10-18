@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { ResendConfirmation } from '@/components/auth/ResendConfirmation';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
@@ -103,6 +103,7 @@ export function AcceptInvitePage() {
   /** Accept flow progress — overrides the computed state while running. */
   const [phase, setPhase] = useState<'idle' | 'joining' | 'joined'>('idle');
   const startedRef = useRef(false);
+  const autoTriedRef = useRef(false);
 
   useEffect(() => {
     // StrictMode double-effect guard: one preview GET per mount.
@@ -159,7 +160,18 @@ export function AcceptInvitePage() {
     };
   }, [status]);
 
-  const handleAccept = async (): Promise<void> => {
+  const finishJoin = useCallback(async (): Promise<void> => {
+    // The session cookie now carries the new role server-side — re-read it
+    // so the dashboard's role gating is fresh without a hard reload.
+    const result = await me();
+    if (result.kind === 'ok') dispatch(setUser(result.user));
+    // The cached org/members pre-date this membership — refetch from scratch.
+    dispatch(clearOrg());
+    dispatch(clearMembers());
+    setPhase('joined');
+  }, [dispatch]);
+
+  const handleAccept = useCallback(async (): Promise<void> => {
     setJoinError('');
     setPhase('joining');
     try {
@@ -179,18 +191,16 @@ export function AcceptInvitePage() {
       return;
     }
     await finishJoin();
-  };
+  }, [token, finishJoin]);
 
-  const finishJoin = async (): Promise<void> => {
-    // The session cookie now carries the new role server-side — re-read it
-    // so the dashboard's role gating is fresh without a hard reload.
-    const result = await me();
-    if (result.kind === 'ok') dispatch(setUser(result.user));
-    // The cached org/members pre-date this membership — refetch from scratch.
-    dispatch(clearOrg());
-    dispatch(clearMembers());
-    setPhase('joined');
-  };
+  // Auto-join: the visitor opened the invite link and is already signed in
+  // as the invited, verified email — accept for them. The button below only
+  // appears as the fallback when this one-shot attempt errors.
+  useEffect(() => {
+    if (status !== 'ready' || autoTriedRef.current) return;
+    autoTriedRef.current = true;
+    void handleAccept();
+  }, [status, handleAccept]);
 
   const handleSignOutForInvite = async (): Promise<void> => {
     try {

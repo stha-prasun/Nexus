@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { DatabaseModule } from '../../database/database.module';
 import { MailModule } from '../../mail/mail.module';
+import { MembersRepository } from '../../members/api/repositories/members.repository';
 import { RedisModule } from '../../redis/redis.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -38,6 +39,10 @@ const dummyHashProvider = {
   providers: [
     AuthService,
     AuthRepository,
+    // Provided here as well as in MembersModule (stateless, DRIZZLE-only) so
+    // AuthService can auto-accept invites at verify time without importing
+    // MembersModule — which imports AuthModule and would form a cycle.
+    MembersRepository,
     UserFactory,
     SessionService,
     SessionAuthGuard,

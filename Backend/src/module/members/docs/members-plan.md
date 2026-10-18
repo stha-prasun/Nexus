@@ -268,6 +268,8 @@ Failure states: invalid/expired token → dead-link page ("Ask your Admin to res
 
 Pending-invite round-trip: `sessionStorage` key set when the link is opened, cleared on successful accept or when the user starts a non-invite signup/login.
 
+**Implemented addition — auto-join at email verification:** an invitee who signs up with the invited address no longer has to click through the accept page. `POST /auth/verify-email`, after consuming the verification token, best-effort runs `MembersRepository.acceptPendingForEmail(email, userId)` — the same accept transaction (advisory lock, `invitedRole → users.role`, `userId` filled, `ACTIVE`) selected by the invite identity — and deletes the invite's Redis token keys. Proving address ownership **is** the accept (same bar the accept endpoint itself enforces). A failure there is logged loudly and never fails verification; the accept page remains the manual fallback, and it now also auto-accepts on its `ready` state (signed-in + verified + email match) with the button as error fallback. AuthModule provides `MembersRepository` directly (DRIZZLE-only) so no Auth ↔ Members module cycle forms.
+
 Dashboard honesty after removal: `GET /organization → null` → removed user sees the existing *"Ask your Admin to add {email}"* state (not the member table with buttons that 403). Their `auth/me` role also reads `Dev` (§5.6), so no stale `Admin`-gated UI (e.g. create-organization) renders either.
 
 ## 8. Edge cases (acceptance checklist)

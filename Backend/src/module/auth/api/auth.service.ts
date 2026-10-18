@@ -12,6 +12,11 @@ import * as bcrypt from 'bcrypt';
 import type { Redis } from 'ioredis';
 import { AppLogger } from '../../../common/logger/logger';
 import { MailQueue } from '../../mail/mail.queue';
+import {
+  inviteMembershipKey,
+  inviteTokenKey,
+} from '../../members/api/constants/members.constants';
+import { MembersRepository } from '../../members/api/repositories/members.repository';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
 import {
   DUMMY_HASH,
@@ -88,6 +93,9 @@ export class AuthService {
     private readonly repository: AuthRepository,
     private readonly mailQueue: MailQueue,
     private readonly sessions: SessionService,
+    // Provided directly in AuthModule (needs only DRIZZLE) — MembersModule
+    // imports AuthModule, so importing it here would form a cycle.
+    private readonly membersRepository: MembersRepository,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(DUMMY_HASH) private readonly dummyHash: string,
     logger: AppLogger,
@@ -152,6 +160,11 @@ export class AuthService {
       await this.repository.save(user);
     }
     await this.consumeToken(token, user.id as string);
+    // Proving address ownership IS the accept for a pending invite: the
+    // invitee signed up with the invited email, so join them now instead of
+    // making them click through the accept page (best-effort — a failure is
+    // logged loudly and that page remains the manual fallback).
+    await this.autoAcceptPendingInvite(user);
     return { status: 'verified' };
   }
 
@@ -390,6 +403,45 @@ export class AuthService {
     const pipeline = this.redis.pipeline();
     pipeline.del(verificationTokenKey(token));
     pipeline.del(verificationUserKey(userId));
+    await pipeline.exec();
+  }
+
+  /**
+   * Join every pending invite addressed to this user's (now verified) email.
+   * Verification must not fail because the membership join failed — that
+   * would rob the user of a working account — so errors are logged loudly
+   * and the accept page stays as the manual fallback.
+   */
+  private async autoAcceptPendingInvite(user: User): Promise<void> {
+    try {
+      const accepted = await this.membersRepository.acceptPendingForEmail(
+        user.email,
+        user.id as string,
+      );
+      for (const { membershipId } of accepted) {
+        await this.consumeInviteToken(membershipId);
+      }
+      if (accepted.length > 0) {
+        this.log.info('invite auto-accepted at verification', {
+          userId: user.id,
+          memberships: accepted.map((entry) => entry.membershipId).join(','),
+          roles: accepted.map((entry) => entry.role).join(','),
+        });
+      }
+    } catch (error) {
+      this.log.error('invite auto-accept failed', {
+        userId: user.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Best-effort invite token cleanup (same layout as MembersService). */
+  private async consumeInviteToken(membershipId: string): Promise<void> {
+    const token = await this.redis.get(inviteMembershipKey(membershipId));
+    const pipeline = this.redis.pipeline();
+    pipeline.del(inviteMembershipKey(membershipId));
+    if (token !== null) pipeline.del(inviteTokenKey(token));
     await pipeline.exec();
   }
 

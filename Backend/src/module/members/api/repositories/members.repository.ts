@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Role } from '../../../auth/api/constants/auth.constants';
 import { DRIZZLE } from '../../../database/constants/database.contants';
@@ -66,6 +66,12 @@ export type AcceptResult =
   | { outcome: 'accepted'; member: Member }
   | { outcome: 'gone' }
   | { outcome: 'already' };
+
+/** One auto-joined invite (verify-time accept) — id + the role applied. */
+export interface AcceptedInviteRef {
+  membershipId: string;
+  role: Role;
+}
 
 /** Thrown inside the role-change/removal transaction to force a rollback. */
 class LastAdminError extends Error {
@@ -443,6 +449,57 @@ export class MembersRepository {
       const updatedRow = updated[0];
       if (updatedRow === undefined) return { outcome: 'gone' as const };
       return { outcome: 'accepted' as const, member: toMember(updatedRow) };
+    });
+  }
+
+  /**
+   * Auto-accept every pending invite for `email` — called when the owner
+   * proves address ownership by verifying their account (verifyEmail).
+   * Same transaction shape as accept() (advisory lock, FOR UPDATE, copy
+   * invitedRole → users.role, null invitedRole, set userId + ACTIVE +
+   * acceptedAt) but selected by the invite identity (email), because at
+   * verify time there is no membership id and `user_id` is still NULL.
+   * A CHECK-violating INVITED row (no role) is skipped, not accepted.
+   */
+  async acceptPendingForEmail(
+    email: string,
+    userId: string,
+  ): Promise<AcceptedInviteRef[]> {
+    return this.db.transaction(async (tx) => {
+      await this.lock(tx);
+      const rows = (await tx
+        .select({
+          id: organizationMembers.id,
+          invitedRole: organizationMembers.invitedRole,
+        })
+        .from(organizationMembers)
+        .where(
+          and(
+            eq(organizationMembers.email, email),
+            eq(organizationMembers.status, 'INVITED'),
+          ),
+        )
+        .for('update')) as { id: string; invitedRole: Role | null }[];
+
+      const accepted: AcceptedInviteRef[] = [];
+      for (const row of rows) {
+        if (row.invitedRole === null) continue;
+        await tx
+          .update(users)
+          .set({ role: row.invitedRole })
+          .where(eq(users.id, userId));
+        await tx
+          .update(organizationMembers)
+          .set({
+            userId,
+            status: 'ACTIVE',
+            invitedRole: null,
+            acceptedAt: new Date(),
+          })
+          .where(eq(organizationMembers.id, row.id));
+        accepted.push({ membershipId: row.id, role: row.invitedRole });
+      }
+      return accepted;
     });
   }
 

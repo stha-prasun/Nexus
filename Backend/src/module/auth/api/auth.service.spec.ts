@@ -3,6 +3,11 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import * as bcrypt from 'bcrypt';
 import { AppLogger } from '../../../common/logger/logger';
 import { MailQueue } from '../../mail/mail.queue';
+import {
+  inviteMembershipKey,
+  inviteTokenKey,
+} from '../../members/api/constants/members.constants';
+import { MembersRepository } from '../../members/api/repositories/members.repository';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
 import { AuthService } from './auth.service';
 import {
@@ -75,6 +80,9 @@ describe('AuthService', () => {
     destroyAndUnindex: jest.fn(),
     revokeAllForUser: jest.fn(),
   };
+  const membersRepository = {
+    acceptPendingForEmail: jest.fn(),
+  };
   const DUMMY =
     '$2b$04$dummydummydummydummydummydummydummydummydummydummydummy';
 
@@ -117,6 +125,7 @@ describe('AuthService', () => {
     mailQueue.enqueueAccountExists.mockResolvedValue(undefined);
     redis.get.mockResolvedValue(null);
     compareMock.mockReset();
+    membersRepository.acceptPendingForEmail.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -125,6 +134,7 @@ describe('AuthService', () => {
         { provide: UserFactory, useValue: userFactory },
         { provide: MailQueue, useValue: mailQueue },
         { provide: SessionService, useValue: sessions },
+        { provide: MembersRepository, useValue: membersRepository },
         { provide: DUMMY_HASH, useValue: DUMMY },
         { provide: REDIS_CLIENT, useValue: redis },
         {
@@ -283,6 +293,64 @@ describe('AuthService', () => {
       expect(repository.save).not.toHaveBeenCalled();
       expect(user.emailVerifiedAt).toEqual(verifiedAt);
       expect(result).toEqual({ status: 'verified' });
+    });
+
+    it('auto-accepts a pending invite for the verified email and kills its token keys', async () => {
+      const user = buildUser({ id: uuid(11) });
+      // First read: verification token → uid; later read: invite token.
+      redis.get.mockImplementation(async (key: string) =>
+        key.startsWith('auth:verify:') ? uuid(11) : 'invite-token-abc',
+      );
+      repository.findById.mockResolvedValue(user);
+      repository.save.mockImplementation(async (u: User) => u);
+      membersRepository.acceptPendingForEmail.mockResolvedValue([
+        { membershipId: 'mid-1', role: 'HR' },
+      ]);
+
+      const result = await service.verifyEmail('sometoken');
+
+      expect(result).toEqual({ status: 'verified' });
+      expect(membersRepository.acceptPendingForEmail).toHaveBeenCalledWith(
+        'ada@example.com',
+        uuid(11),
+      );
+      // 2 verification keys + invite mid key + invite token key.
+      expect(pipeline.del).toHaveBeenCalledWith(inviteMembershipKey('mid-1'));
+      expect(pipeline.del).toHaveBeenCalledWith(
+        inviteTokenKey('invite-token-abc'),
+      );
+      expect(pipeline.del).toHaveBeenCalledTimes(4);
+    });
+
+    it('a failed auto-accept still verifies (the accept page is the fallback)', async () => {
+      const user = buildUser({ id: uuid(11) });
+      redis.get.mockResolvedValue(uuid(11));
+      repository.findById.mockResolvedValue(user);
+      repository.save.mockImplementation(async (u: User) => u);
+      membersRepository.acceptPendingForEmail.mockRejectedValue(
+        new Error('db down'),
+      );
+
+      const result = await service.verifyEmail('sometoken');
+
+      expect(result).toEqual({ status: 'verified' });
+      // Only the verification keys — no invite cleanup ran.
+      expect(pipeline.del).toHaveBeenCalledTimes(2);
+    });
+
+    it('skips invite token cleanup when nothing was accepted', async () => {
+      const user = buildUser({ id: uuid(11) });
+      redis.get.mockResolvedValue(uuid(11));
+      repository.findById.mockResolvedValue(user);
+      repository.save.mockImplementation(async (u: User) => u);
+
+      await service.verifyEmail('sometoken');
+
+      expect(membersRepository.acceptPendingForEmail).toHaveBeenCalledWith(
+        'ada@example.com',
+        uuid(11),
+      );
+      expect(pipeline.del).toHaveBeenCalledTimes(2);
     });
   });
 
