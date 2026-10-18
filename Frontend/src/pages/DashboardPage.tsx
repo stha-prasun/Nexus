@@ -8,24 +8,35 @@ import { OrgView, RoleSelect } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
 import {
   ApiError,
+  changeMemberRole,
   createOrganization,
   deleteOrganization,
+  inviteMember,
   logout,
+  removeMember,
   updateOrganization,
 } from '@/lib/api';
 import type { DashboardState, Member, Org, RoleKey } from '@/lib/dashboard';
 import {
   CURRENT_USER,
   createDemoState,
+  displayMember,
   EMAIL_PATTERN,
   INPUT,
   ROLES,
   SLUG_PATTERN,
   slugify,
+  toApiRole,
   toRoleKey,
 } from '@/lib/dashboard';
-import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
+import {
+  useAppDispatch,
+  useAppSelector,
+  useMembers,
+  useOrganization,
+} from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
+import { clearMembers } from '@/store/slices/membersSlice';
 import { clearOrg, removeOrg, setOrg } from '@/store/slices/orgSlice';
 
 function Field({
@@ -112,6 +123,18 @@ export function DashboardPage() {
     retry: retryOrg,
     refresh: refreshOrg,
   } = useOrganization();
+  const {
+    members: roster,
+    status: membersStatus,
+    error: membersError,
+    retry: retryMembers,
+    refresh: refreshRoster,
+  } = useMembers();
+
+  /** Real roster once loaded; the demo list only backstops the no-org views. */
+  const displayMembers: Member[] =
+    membersStatus === 'ready' ? roster.map(displayMember) : [];
+  const rowAt = (index: number) => roster[index];
 
   /** This device only — "log out everywhere" lives on the profile page. */
   const handleLogout = (): void => {
@@ -121,6 +144,7 @@ export function DashboardPage() {
       } catch {
         // Best-effort server-side invalidation; the cookie still dies at TTL.
       }
+      dispatch(clearMembers());
       dispatch(clearOrg());
       dispatch(setAnonymous());
       navigate('/', { replace: true });
@@ -149,7 +173,7 @@ export function DashboardPage() {
     }
   };
 
-  const { members, projects } = state;
+  const { projects } = state;
   // Real session role drives gating — the demo `viewAs` state no longer does.
   const roleKey: RoleKey = authUser ? toRoleKey(authUser.role) : 'pm';
   const canManageOrg = authUser?.role === 'Admin';
@@ -198,7 +222,7 @@ export function DashboardPage() {
           .trim()
           .toLowerCase();
         if (!EMAIL_PATTERN.test(email)) return 'Enter a valid email address.';
-        if (members.some((member) => member.email === email))
+        if (displayMembers.some((member) => member.email === email))
           return 'That person is already a member.';
         return '';
       },
@@ -208,25 +232,28 @@ export function DashboardPage() {
       .trim()
       .toLowerCase();
     const role = result.get('role') as RoleKey;
-    setState((current) => ({
-      ...current,
-      members: [
-        ...current.members,
-        {
-          name: (email.split('@')[0] ?? email) as string,
-          email,
-          role,
-          invited: true,
-        },
-      ],
-    }));
-    bumpGraph();
-    show(`Invite sent to ${email}`);
+    try {
+      const { message } = await inviteMember({
+        email,
+        role: toApiRole(role),
+      });
+      await refreshRoster();
+      bumpGraph();
+      // Server message covers both "sent" and "re-invited (new link)".
+      show(message);
+    } catch (error) {
+      show(
+        error instanceof ApiError
+          ? error.messages.join(' ')
+          : 'Something went wrong. Please try again.',
+      );
+    }
   };
 
   const handleRemoveMember = async (index: number): Promise<void> => {
-    const member = members[index];
-    if (!member || !org) return;
+    const member = displayMembers[index];
+    const row = rowAt(index);
+    if (!member || !row || !org) return;
     const result = await ask({
       title: `Remove ${member.name}?`,
       ok: 'Remove',
@@ -239,28 +266,45 @@ export function DashboardPage() {
       ),
     });
     if (!result) return;
-    setState((current) => ({
-      ...current,
-      members: current.members.filter((_, i) => i !== index),
-      projects: current.projects.map((project) => ({
-        ...project,
-        people: project.people
-          .filter((person) => person !== index)
-          .map((person) => (person > index ? person - 1 : person)),
-      })),
-    }));
-    bumpGraph();
-    show(`${member.name} removed`);
+    try {
+      await removeMember(row.id);
+      await refreshRoster();
+      bumpGraph();
+      show(`${member.name} removed`);
+    } catch (error) {
+      show(
+        error instanceof ApiError
+          ? error.messages.join(' ')
+          : 'Something went wrong. Please try again.',
+      );
+    }
   };
 
   const handleRoleChange = (index: number, role: RoleKey): void => {
-    setState((current) => {
-      const nextMembers: Member[] = current.members.map((member, i) =>
-        i === index ? { ...member, role } : member,
-      );
-      return { ...current, members: nextMembers };
-    });
-    show('Role updated');
+    const row = rowAt(index);
+    if (!row) return;
+    void (async () => {
+      let changed = false;
+      try {
+        await changeMemberRole(row.id, toApiRole(role));
+        changed = true;
+      } catch (error) {
+        show(
+          error instanceof ApiError
+            ? error.messages.join(' ')
+            : 'Something went wrong. Please try again.',
+        );
+      }
+      // Revalidate either way: on failure the roster reverts the optimistic
+      // select, on success it picks up the server's authoritative role.
+      try {
+        await refreshRoster();
+        bumpGraph();
+      } catch {
+        // Already surfaced above (or the list keeps its previous truth).
+      }
+      if (changed) show('Role updated');
+    })();
   };
 
   const handleEditOrg = async (): Promise<void> => {
@@ -349,9 +393,9 @@ export function DashboardPage() {
       }
     }
     dispatch(removeOrg());
+    dispatch(clearMembers());
     setState((current) => ({
       ...current,
-      members: current.members.slice(0, 1),
       projects: [],
     }));
     show('Organization deleted');
@@ -364,6 +408,8 @@ export function DashboardPage() {
   const handleCreateOrg = async (created: Org): Promise<void> => {
     const organization = await createOrganization(created);
     dispatch(setOrg(organization));
+    // The roster was never fetchable pre-org — prime a fresh load.
+    dispatch(clearMembers());
     setState((current) => ({
       ...current,
       viewAs: 'admin',
@@ -392,8 +438,8 @@ export function DashboardPage() {
     <AppShell
       org={org}
       user={{
-        name: authUser?.name ?? members[0]?.name ?? CURRENT_USER.name,
-        email: authUser?.email ?? members[0]?.email ?? CURRENT_USER.email,
+        name: authUser?.name ?? CURRENT_USER.name,
+        email: authUser?.email ?? CURRENT_USER.email,
         roleLabel: authUser
           ? ROLES[toRoleKey(authUser.role)].label
           : 'No role yet',
@@ -432,26 +478,53 @@ export function DashboardPage() {
             </button>
           </div>
         ) : org ? (
-          <OrgView
-            org={org}
-            members={members}
-            projects={projects}
-            viewAs={roleKey}
-            canManageOrg={canManageOrg}
-            canManageMembers={canManageMembers}
-            graphKey={viewKey}
-            onAddMember={() => void handleAddMember()}
-            onRemoveMember={(index) => void handleRemoveMember(index)}
-            onRoleChange={handleRoleChange}
-            onEditOrg={() => void handleEditOrg()}
-            onDeleteOrg={() => void handleDeleteOrg()}
-            onNewProject={() => show('Projects page is next')}
-          />
+          membersStatus === 'error' && displayMembers.length === 0 ? (
+            <div className="flex flex-col items-center gap-4 py-24 text-center">
+              <p className="text-[15px] font-semibold text-ink">
+                Couldn&apos;t load your members.
+              </p>
+              <p className="max-w-sm text-sm text-ink-soft">
+                {membersError.join(' ')}
+              </p>
+              <button
+                type="button"
+                onClick={retryMembers}
+                className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cobalt focus-visible:ring-offset-2"
+              >
+                Retry
+              </button>
+            </div>
+          ) : displayMembers.length === 0 ? (
+            <div
+              role="status"
+              aria-label="Loading members"
+              className="flex justify-center py-24"
+            >
+              <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
+            </div>
+          ) : (
+            <OrgView
+              org={org}
+              members={displayMembers}
+              projects={projects}
+              viewAs={roleKey}
+              myEmail={authUser?.email}
+              canManageOrg={canManageOrg}
+              canManageMembers={canManageMembers}
+              graphKey={viewKey}
+              onAddMember={() => void handleAddMember()}
+              onRemoveMember={(index) => void handleRemoveMember(index)}
+              onRoleChange={handleRoleChange}
+              onEditOrg={() => void handleEditOrg()}
+              onDeleteOrg={() => void handleDeleteOrg()}
+              onNewProject={() => show('Projects page is next')}
+            />
+          )
         ) : canManageOrg ? (
           <EmptyOrgView onCreate={handleCreateOrg} />
         ) : (
           <NoOrgView
-            email={authUser?.email ?? members[0]?.email ?? CURRENT_USER.email}
+            email={authUser?.email ?? CURRENT_USER.email}
             onCheckAgain={handleCheckAgain}
             onSignOut={handleLogout}
             onToast={show}

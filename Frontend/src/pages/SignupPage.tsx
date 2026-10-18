@@ -7,23 +7,9 @@ import {
 } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { ApiError, type Role, register } from '@/lib/api';
+import { ApiError, register } from '@/lib/api';
 import { setPendingEmail, startCooldown } from '@/lib/resend';
 import { useAppSelector } from '@/store/hooks';
-
-// Open signup roles — Admin is provisioned internally and never listed here.
-const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: 'PM', label: 'Project Manager' },
-  { value: 'HR', label: 'Human Resources' },
-  { value: 'Dev', label: 'Developer' },
-];
 
 const passwordPolicyOk = (value: string): boolean =>
   value.length >= 8 &&
@@ -59,7 +45,6 @@ export function SignupPage() {
   const [submitting, setSubmitting] = useState(false);
   const [graphActive, setGraphActive] = useState(false);
   const [strength, setStrength] = useState(0);
-  const [role, setRole] = useState<Role | ''>('');
 
   const panelRef = useRef<HTMLElement>(null);
   const fullnameRef = useRef<HTMLInputElement>(null);
@@ -106,8 +91,6 @@ export function SignupPage() {
     } else if (!passwordPolicyOk(password)) {
       message =
         'Password needs 8+ characters with upper, lower, number and symbol.';
-    } else if (!role) {
-      message = 'Choose the role that fits you best.';
     } else if (!terms) {
       message = 'Please accept the Terms and Privacy Policy to continue.';
     }
@@ -116,12 +99,11 @@ export function SignupPage() {
       triggerShake();
       return;
     }
-    // Validated above; guard keeps the narrowing for register() honest.
-    if (!role) return;
 
     setSubmitting(true);
     try {
-      await register({ name, email, password, role });
+      // No role — the server grants the default; roles arrive via invite.
+      await register({ name, email, password });
       // Persist for /confirm-sent refresh + /verify-email resend; start the
       // 5-minute resend cooldown now (the confirmation mail just went out).
       setPendingEmail(email);
@@ -342,43 +324,6 @@ export function SignupPage() {
                   />
                 ))}
               </div>
-            </div>
-
-            <div>
-              <label
-                htmlFor="role"
-                className="mb-1.5 block text-sm font-semibold"
-              >
-                Role
-              </label>
-              <Select
-                value={role === '' ? undefined : role}
-                onValueChange={(value) => setRole(value as Role)}
-                disabled={submitting}
-              >
-                <SelectTrigger
-                  id="role"
-                  name="role"
-                  className="data-[size=default]:h-auto w-full rounded border border-ink-line bg-white px-3.5 text-[15px] text-ink outline-none transition focus:border-cobalt focus:ring-[3px] focus:ring-cobalt/20 focus-visible:border-cobalt focus-visible:ring-[3px] focus-visible:ring-cobalt/20 data-placeholder:text-ink-soft/60 [&_svg]:text-ink-soft"
-                >
-                  <SelectValue placeholder="Select your role" />
-                </SelectTrigger>
-                <SelectContent
-                  position="popper"
-                  align="start"
-                  className="min-w-(--radix-select-trigger-width) rounded border border-ink-line bg-white p-1 text-ink shadow-[0_18px_40px_-16px_rgba(10,15,80,.45)] ring-0"
-                >
-                  {ROLE_OPTIONS.map((option) => (
-                    <SelectItem
-                      key={option.value}
-                      value={option.value}
-                      className="rounded py-2 pl-3.5 pr-8 text-[15px] text-ink focus:bg-mist focus:text-ink [&_svg]:text-cobalt"
-                    >
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <label className="flex cursor-pointer items-start gap-2.5 text-sm text-ink-soft">

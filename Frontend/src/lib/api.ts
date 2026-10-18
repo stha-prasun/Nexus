@@ -3,11 +3,11 @@ const BASE_URL: string =
 
 export type Role = 'PM' | 'Dev' | 'Admin' | 'HR';
 
+/** Registration grants no role (the factory persists the default) — §members 5.4. */
 export interface RegisterPayload {
   name: string;
   email: string;
   password: string;
-  role: Role;
 }
 
 export interface RegisterResponse {
@@ -16,35 +16,44 @@ export interface RegisterResponse {
 
 /**
  * Non-2xx response from the API. `messages` always holds at least one
- * human-readable line (Nest sends validation errors as string[]).
+ * human-readable line (Nest sends validation errors as string[]). `code` is
+ * the app-level discriminator when the body carries one (`{ status: "…",
+ * message }` — e.g. invite_email_mismatch vs email_unverified).
  */
 export class ApiError extends Error {
   readonly status: number;
   readonly messages: string[];
+  readonly code: string | undefined;
 
-  constructor(status: number, messages: string[]) {
+  constructor(status: number, messages: string[], code?: string) {
     super(messages.join(' '));
     this.name = 'ApiError';
     this.status = status;
     this.messages = messages;
+    this.code = code;
   }
 }
 
 const parseError = async (response: Response): Promise<ApiError> => {
   let messages: string[] = ['Something went wrong. Please try again.'];
+  let code: string | undefined;
   try {
     const body = (await response.json()) as {
       message?: string | string[];
+      status?: unknown;
     };
     if (Array.isArray(body.message) && body.message.length > 0) {
       messages = body.message;
     } else if (typeof body.message === 'string' && body.message) {
       messages = [body.message];
     }
+    if (typeof body.status === 'string' && body.status) {
+      code = body.status;
+    }
   } catch {
     // Non-JSON error body — keep the generic fallback.
   }
-  return new ApiError(response.status, messages);
+  return new ApiError(response.status, messages, code);
 };
 
 async function apiRequest<T>(
@@ -264,4 +273,91 @@ export function updateOrganization(payload: {
 /** 204 No Content — resolves once the singleton row is gone. */
 export function deleteOrganization(): Promise<void> {
   return apiRequest<void>('/organization', 'DELETE');
+}
+
+// ------------------------------------------------------------------ members
+
+export type MemberStatus = 'INVITED' | 'ACTIVE';
+
+/** One row of GET /members — membership/invitation, never the session user. */
+export interface MemberListItem {
+  /** Membership row id — the handle for role change / removal. */
+  id: string;
+  /** Null while INVITED with no account yet — the UI falls back to the email local-part. */
+  name: string | null;
+  email: string;
+  role: Role;
+  status: MemberStatus;
+  invitedAt: string;
+  acceptedAt: string | null;
+  invitedBy: string | null;
+}
+
+/** Any ACTIVE member may read the roster (Dev included). */
+export function listMembers(): Promise<{ members: MemberListItem[] }> {
+  return apiRequest<{ members: MemberListItem[] }>('/members', 'GET');
+}
+
+/**
+ * Invite by email (Admin/HR/PM per the §1.1 matrix). An INVITED row for the
+ * same email merges (role updated, link reissued) — the server answers the
+ * message for both paths.
+ */
+export function inviteMember(payload: {
+  email: string;
+  role: Role;
+}): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>('/members/invites', 'POST', payload);
+}
+
+/** Regenerate + resend an INVITED row's link (lost mail / expired link). */
+export function resendInvite(id: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/members/invites/${encodeURIComponent(id)}/resend`,
+    'POST',
+  );
+}
+
+export function changeMemberRole(
+  id: string,
+  role: Role,
+): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/members/${encodeURIComponent(id)}/role`,
+    'PATCH',
+    { role },
+  );
+}
+
+/** 200 { message } — ACTIVE removal also revokes that member's sessions. */
+export function removeMember(id: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/members/${encodeURIComponent(id)}`,
+    'DELETE',
+  );
+}
+
+export interface InvitePreview {
+  status: 'valid';
+  email: string;
+  orgName: string;
+  role: Role;
+  /** none — no account yet; unverified — never confirmed; verified — ready. */
+  accountState: 'none' | 'unverified' | 'verified';
+}
+
+/** Public — the token IS the capability (404 { status } when dead). */
+export function getInvitePreview(token: string): Promise<InvitePreview> {
+  return apiRequest<InvitePreview>(
+    `/members/invites/${encodeURIComponent(token)}`,
+    'GET',
+  );
+}
+
+/** Accept as the signed-in invitee (403 mismatch/unverified, 409 already). */
+export function acceptInvite(token: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/members/invites/${encodeURIComponent(token)}/accept`,
+    'POST',
+  );
 }

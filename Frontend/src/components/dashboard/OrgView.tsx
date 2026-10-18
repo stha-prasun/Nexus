@@ -10,9 +10,11 @@ interface OrgViewProps {
   projects: Project[];
   /** Display role for "you" (hero badge, description line) — from the real session. */
   viewAs: RoleKey;
+  /** The session user's email — the row matching it is "you" (never index-based). */
+  myEmail?: string;
   /** Edit/delete the organization — Admin only. */
   canManageOrg: boolean;
-  /** Invite/remove members and change their roles — visual only until member APIs land. */
+  /** Invite/remove members and change their roles (server-enforced §1.1 matrix). */
   canManageMembers: boolean;
   graphKey: number;
   onAddMember: () => void;
@@ -304,6 +306,7 @@ export function OrgView({
   members,
   projects,
   viewAs,
+  myEmail,
   canManageOrg,
   canManageMembers,
   graphKey,
@@ -315,7 +318,7 @@ export function OrgView({
   onNewProject,
 }: OrgViewProps) {
   const rows = members.map((member, i) => {
-    const isMe = i === 0;
+    const isMe = myEmail !== undefined && member.email === myEmail;
     const role = isMe ? viewAs : member.role;
     const roleCell =
       canManageMembers && !isMe ? (

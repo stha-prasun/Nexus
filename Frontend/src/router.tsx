@@ -1,6 +1,7 @@
 import { createBrowserRouter } from 'react-router';
 import { RequireAuth } from '@/components/auth/RequireAuth';
 import { RootLayout } from '@/layouts/RootLayout';
+import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { ConfirmSentPage } from '@/pages/ConfirmSentPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
@@ -25,6 +26,12 @@ export const router = createBrowserRouter([
   {
     path: 'verify-email',
     Component: VerifyEmailPage,
+  },
+  {
+    // Public: the page itself handles anonymous / wrong-account / unverified
+    // states (the token is the capability) — no RequireAuth bounce.
+    path: 'accept-invite',
+    Component: AcceptInvitePage,
   },
   {
     path: 'dashboard',

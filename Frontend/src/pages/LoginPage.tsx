@@ -2,9 +2,13 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { cssVars, TaskGraph } from '@/components/auth/TaskGraph';
 import { ApiError, login } from '@/lib/api';
+import { peekInviteReturn, takeInviteReturn } from '@/lib/invite';
 import { setPendingEmail } from '@/lib/resend';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { setUser } from '@/store/slices/authSlice';
+
+/** Invite links win over /dashboard until consumed — see lib/invite.ts. */
+const landingTarget = (): string => takeInviteReturn() ?? '/dashboard';
 
 export function LoginPage() {
   const dispatch = useAppDispatch();
@@ -63,7 +67,7 @@ export function LoginPage() {
       try {
         const { user } = await login({ email, password, remember });
         dispatch(setUser(user));
-        navigate('/dashboard', { replace: true });
+        navigate(landingTarget(), { replace: true });
       } catch (error) {
         if (error instanceof ApiError && error.status === 403) {
           // Correct password, unverified account — resend flow takes over.
@@ -84,7 +88,7 @@ export function LoginPage() {
 
   // Already signed in (session restored on load, or login just succeeded).
   if (authStatus === 'authenticated') {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={peekInviteReturn() ?? '/dashboard'} replace />;
   }
 
   return (

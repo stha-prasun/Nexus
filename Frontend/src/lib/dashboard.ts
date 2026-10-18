@@ -1,9 +1,12 @@
-import type { Role } from '@/lib/api';
+import type { MemberListItem, Role } from '@/lib/api';
 
 export type RoleKey = 'pm' | 'admin' | 'dev' | 'hr';
 
 /** Session role from the auth store ('PM' | 'Dev' | 'Admin' | 'HR') → dashboard key. */
 export const toRoleKey = (role: Role): RoleKey => role.toLowerCase() as RoleKey;
+
+/** Dashboard role key → API role (invite payloads, role-change PATCH). */
+export const toApiRole = (key: RoleKey): Role => key.toUpperCase() as Role;
 
 export const ROLES: Record<
   RoleKey,
@@ -43,6 +46,14 @@ export interface Member {
   role: RoleKey;
   invited?: boolean;
 }
+
+/** API roster row → the dashboard's display shape (name falls back to local-part). */
+export const displayMember = (row: MemberListItem): Member => ({
+  name: row.name ?? row.email.split('@')[0] ?? row.email,
+  email: row.email,
+  role: toRoleKey(row.role),
+  invited: row.status === 'INVITED',
+});
 
 export interface Project {
   name: string;

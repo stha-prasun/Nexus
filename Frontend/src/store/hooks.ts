@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import type { Organization } from '@/lib/api';
 import type { AppDispatch, RootState } from '@/store';
+import { fetchMembers, refreshMembers } from '@/store/slices/membersSlice';
 import {
   fetchOrganization,
   refreshOrganization,
@@ -34,4 +35,31 @@ export function useOrganization() {
     dispatch(refreshOrganization());
 
   return { org, status, error, retry, refresh };
+}
+
+/**
+ * The organization roster: fetched once an org exists (never while `org` is
+ * null — invitees and pre-create admins would only earn a 403/empty list).
+ * `refresh` revalidates after every mutation without touching `status`, so
+ * the table never flickers.
+ */
+export function useMembers() {
+  const dispatch = useAppDispatch();
+  const org = useAppSelector((state) => state.org.org);
+  const status = useAppSelector((state) => state.members.status);
+  const members = useAppSelector((state) => state.members.members);
+  const error = useAppSelector((state) => state.members.error);
+
+  useEffect(() => {
+    if (org && status === 'unknown') void dispatch(fetchMembers());
+  }, [dispatch, org, status]);
+
+  const retry = (): void => {
+    void dispatch(fetchMembers());
+  };
+
+  /** Always GETs fresh; rethrows failures for the caller to toast. */
+  const refresh = (): Promise<typeof members> => dispatch(refreshMembers());
+
+  return { members, status, error, retry, refresh };
 }
