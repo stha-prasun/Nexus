@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 import { RouterProvider } from 'react-router/dom';
+import { LoadingBarContainer } from 'react-top-loading-bar';
 import { SessionGate } from '@/components/auth/SessionGate';
 import { router } from '@/router';
 import { store } from '@/store';
@@ -16,9 +17,13 @@ if (!rootElement) {
 createRoot(rootElement).render(
   <StrictMode>
     <Provider store={store}>
-      <SessionGate>
-        <RouterProvider router={router} />
-      </SessionGate>
+      <LoadingBarContainer
+        props={{ color: '#1f2fe0', height: 3, shadow: false }}
+      >
+        <SessionGate>
+          <RouterProvider router={router} />
+        </SessionGate>
+      </LoadingBarContainer>
     </Provider>
   </StrictMode>,
 );

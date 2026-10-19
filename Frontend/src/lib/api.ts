@@ -1,3 +1,5 @@
+import { trackRequest } from '@/lib/progress';
+
 const BASE_URL: string =
   import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1';
 
@@ -63,16 +65,18 @@ async function apiRequest<T>(
 ): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
-      method,
-      credentials: 'include',
-      ...(body === undefined
-        ? {}
-        : {
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          }),
-    });
+    response = await trackRequest(
+      fetch(`${BASE_URL}${path}`, {
+        method,
+        credentials: 'include',
+        ...(body === undefined
+          ? {}
+          : {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            }),
+      }),
+    );
   } catch {
     // fetch rejects on network failure — surface as status 0.
     throw new ApiError(0, [
@@ -153,10 +157,12 @@ export async function me(): Promise<MeResult> {
 
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL}/auth/me`, {
-      credentials: 'include',
-      signal: controller.signal,
-    });
+    response = await trackRequest(
+      fetch(`${BASE_URL}/auth/me`, {
+        credentials: 'include',
+        signal: controller.signal,
+      }),
+    );
   } catch {
     // Network failure or our own abort — both are "unreachable".
     return { kind: 'unreachable' };
@@ -207,9 +213,11 @@ export interface VerifyEmailResponse {
 export async function verifyEmail(token: string): Promise<VerifyEmailResponse> {
   let response: Response;
   try {
-    response = await fetch(
-      `${BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`,
-      { credentials: 'include' },
+    response = await trackRequest(
+      fetch(
+        `${BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`,
+        { credentials: 'include' },
+      ),
     );
   } catch {
     throw new ApiError(0, [
