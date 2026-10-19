@@ -139,6 +139,54 @@
     }
 }
 
+/* ===== Scrollbar — ink line default, cobalt while dragging =====
+   Square thumb to match the dashboard's sharp-corner controls. */
+:root {
+    color-scheme: light;
+    --scroll-thumb: #cdd0e0;
+    --scroll-thumb-hover: #5a6080;
+    --scroll-thumb-active: #1f2fe0;
+}
+.dark {
+    color-scheme: dark;
+    --scroll-thumb: rgb(255 255 255 / 18%);
+    --scroll-thumb-hover: rgb(255 255 255 / 34%);
+    --scroll-thumb-active: #4d5cff;
+}
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--scroll-thumb);
+    background-clip: content-box;
+    border: 2px solid transparent;
+    transition: background-color 0.15s ease;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--scroll-thumb-hover);
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:active {
+    background: var(--scroll-thumb-active);
+    background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Firefox: no ::-webkit-scrollbar support — and Chromium ignores the rules
+   above whenever these standard properties are set, so keep them apart. */
+@supports not selector(::-webkit-scrollbar) {
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: var(--scroll-thumb) transparent;
+    }
+}
+
 /* ===== Login page ===== */
 .canvas { background-color:#1F2FE0; background-image:radial-gradient(rgba(255,255,255,.32) 1.5px, transparent 1.5px); background-size:28px 28px; animation:drift 16s linear infinite; }
 .t { font:600 15px Figtree,sans-serif; fill:#14183A; }
