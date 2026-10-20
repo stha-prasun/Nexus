@@ -344,6 +344,82 @@ function EmptyProjects({
   );
 }
 
+/**
+ * Single-project panel (design: dashboard-one-project.html) — the one
+ * project gets a full-width card with an inset color spine, its roster
+ * and an "Open board" CTA, plus the add-another row for managers.
+ */
+function SingleProject({
+  project,
+  members,
+  canManage,
+  onNewProject,
+}: {
+  project: Project;
+  members: Member[];
+  canManage: boolean;
+  onNewProject: () => void;
+}) {
+  const people = project.people
+    .map((idx) => members[idx])
+    .filter((member): member is Member => Boolean(member));
+
+  return (
+    <div className="border border-ink">
+      <div className="grid md:grid-cols-[minmax(0,1fr)_14rem]">
+        <div
+          className="p-6 sm:p-8"
+          style={{ boxShadow: `inset 6px 0 0 ${project.color}` }}
+        >
+          <p className="pl-2 text-xs font-bold uppercase tracking-wider text-ink-soft">
+            Project 01
+          </p>
+          <h3 className="mt-3 pl-2 font-display text-3xl font-bold leading-none tracking-tight">
+            {project.name}
+          </h3>
+          <div className="mt-6 flex flex-wrap items-center gap-4 pl-2">
+            <div className="flex -space-x-px">
+              {people.slice(0, 6).map((member) => (
+                <Avatar
+                  key={member.email}
+                  name={member.name}
+                  size="h-9 w-9 text-xs"
+                  extra="ring-2 ring-white"
+                />
+              ))}
+            </div>
+            <span className="text-sm text-ink-soft">
+              {people.length} members
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 text-left font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0"
+        >
+          Open board
+          <span
+            aria-hidden="true"
+            className="text-2xl leading-none text-sun transition-transform group-hover:translate-x-1"
+          >
+            →
+          </span>
+        </button>
+      </div>
+      {canManage ? (
+        <button
+          type="button"
+          onClick={onNewProject}
+          className="flex w-full items-center justify-between border-t border-dashed border-ink-soft/50 px-6 py-3 text-left text-sm font-semibold text-ink-soft transition-colors hover:border-solid hover:border-ink hover:bg-paper hover:text-ink"
+        >
+          <span>+ New project</span>
+          <span className="font-normal">Add another</span>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function OrgView({
   org,
   members,
@@ -450,9 +526,10 @@ export function OrgView({
     </li>
   ));
 
-  // The "+ New project" tile and row fillers belong to the populated grid;
-  // the zero-project layout is the designed EmptyProjects panel instead.
-  if (projects.length > 0) {
+  // The "+ New project" tile and row fillers belong to the multi-project
+  // grid; the zero-project panel and single-project card are designed
+  // layouts of their own.
+  if (projects.length > 1) {
     if (canManageMembers) {
       cells.push(
         <li key="new-project" className="bg-white">
@@ -583,6 +660,13 @@ export function OrgView({
             orgName={org.name}
             canManage={canManageMembers}
             onCreateProject={onNewProject}
+          />
+        ) : projects.length === 1 ? (
+          <SingleProject
+            project={projects[0]}
+            members={members}
+            canManage={canManageMembers}
+            onNewProject={onNewProject}
           />
         ) : (
           <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">
