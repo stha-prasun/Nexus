@@ -6,6 +6,7 @@ import { AuthModule } from './module/auth/api/auth.module';
 import { HealthModule } from './module/health/health.module';
 import { MembersModule } from './module/members/api/members.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
+import { ProjectsModule } from './projects/projects.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { OrganizationModule } from './module/organization/api/organization.modul
     ThrottlerModule.forRoot([{ name: 'default', limit: 100, ttl: 60_000 }]),
     OrganizationModule,
     MembersModule,
+    ProjectsModule,
   ],
   providers: [
     // Enforces ThrottlerModule limits + every @Throttle override (register
