@@ -611,6 +611,36 @@ describe('MembersService', () => {
         403,
       );
     });
+
+    it('403 project_last_lead_required when the target is the sole lead of a project', async () => {
+      repository.findMembershipById.mockResolvedValue(member());
+      repository.removeMember.mockResolvedValue({
+        outcome: 'sole_lead',
+      } satisfies RemoveMemberResult);
+
+      await expectStatus(
+        service.remove('mid-1', actor),
+        'project_last_lead_required',
+        403,
+      );
+      // Rolled back — no session side effects may leak.
+      expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+    });
+
+    it('INVITED rows are never blocked by the lead invariant (no ACTIVE projects)', async () => {
+      repository.findMembershipById.mockResolvedValue(
+        member({ status: 'INVITED', userId: null, email: 'new@example.com' }),
+      );
+      repository.removeMember.mockResolvedValue({
+        outcome: 'removed',
+        wasActive: false,
+        userId: null,
+      } satisfies RemoveMemberResult);
+
+      await expect(service.remove('mid-1', actor)).resolves.toEqual({
+        message: expect.any(String),
+      });
+    });
   });
 
   // -------------------------------------------------------- getInvitePreview

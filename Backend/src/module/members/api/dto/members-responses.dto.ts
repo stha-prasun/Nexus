@@ -10,6 +10,14 @@ export class MemberResponseDto {
   id!: string;
 
   @ApiProperty({
+    example: '00000000-0000-4000-8000-000000000010',
+    nullable: true,
+    description:
+      'Invitee account id; null while INVITED with no account yet. The handle for project-member routes (pickers filter to ACTIVE).',
+  })
+  userId!: string | null;
+
+  @ApiProperty({
     example: 'Ada',
     nullable: true,
     description:
@@ -95,6 +103,7 @@ export class MemberMessageResponseDto {
 /** Serialization seam — entities never leave the API directly. */
 export const toMemberResponse = (member: Member): MemberResponseDto => ({
   id: member.id,
+  userId: member.userId,
   name: member.name,
   email: member.email,
   role: member.role,

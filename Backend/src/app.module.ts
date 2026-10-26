@@ -6,7 +6,7 @@ import { AuthModule } from './module/auth/api/auth.module';
 import { HealthModule } from './module/health/health.module';
 import { MembersModule } from './module/members/api/members.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
-import { ProjectsModule } from './projects/projects.module';
+import { ProjectsModule } from './module/projects/api/projects.module';
 
 @Module({
   imports: [

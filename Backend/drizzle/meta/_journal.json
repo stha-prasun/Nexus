@@ -50,6 +50,13 @@
       "when": 1792252434302,
       "tag": "0006_low_thundra",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793028383474,
+      "tag": "0007_even_mother_askani",
+      "breakpoints": true
     }
   ]
 }

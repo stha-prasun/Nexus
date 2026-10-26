@@ -51,6 +51,16 @@ export const LAST_ADMIN_STATUS = 'last_admin_required';
 export const LAST_ADMIN_MESSAGE =
   'The organization must keep at least one active Admin. Promote another Admin first.';
 
+/**
+ * 403 — org-member removal would strip a project of its last team lead.
+ * Thrown from inside the removal transaction after locking every project
+ * where the target is a lead (sorted ascending — deadlock-free against the
+ * project path's single lock, plan §4.1); the whole removal rolls back.
+ */
+export const PROJECT_LAST_LEAD_STATUS = 'project_last_lead_required';
+export const PROJECT_LAST_LEAD_MESSAGE =
+  'Promote another team lead before removing this member.';
+
 /** 403 — caller has no ACTIVE membership (or no org and one is required). */
 export const NOT_ACTIVE_MEMBER_STATUS = 'not_active_member';
 export const NOT_ACTIVE_MEMBER_MESSAGE =

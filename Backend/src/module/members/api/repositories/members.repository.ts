@@ -7,8 +7,10 @@ import type { Database } from '../../../database/interfaces/database.interfaces'
 import {
   organizationMembers,
   organizations,
+  projectMembers,
   users,
 } from '../../../database/schema';
+import { projectLockKey } from '../../../projects/api/constants/projects.constants';
 import {
   MEMBERS_ADVISORY_LOCK_KEY,
   REMOVED_MEMBER_ROLE,
@@ -60,7 +62,8 @@ export type ChangeRoleResult =
 export type RemoveMemberResult =
   | { outcome: 'removed'; wasActive: boolean; userId: string | null }
   | { outcome: 'not_found' }
-  | { outcome: 'last_admin' };
+  | { outcome: 'last_admin' }
+  | { outcome: 'sole_lead' };
 
 export type AcceptResult =
   | { outcome: 'accepted'; member: Member }
@@ -78,6 +81,14 @@ class LastAdminError extends Error {
   constructor() {
     super('organization would have zero active admins');
     this.name = 'LastAdminError';
+  }
+}
+
+/** Thrown inside the removal transaction when a project would lose its last lead. */
+class SoleLeadError extends Error {
+  constructor() {
+    super('a project would have zero team leads');
+    this.name = 'SoleLeadError';
   }
 }
 
@@ -344,7 +355,10 @@ export class MembersRepository {
   /**
    * Removal inside the advisory-locked transaction: delete the row; if it
    * was ACTIVE, reset users.role → Dev in the same transaction. Rollback via
-   * LastAdminError when the org would keep zero ACTIVE Admins.
+   * LastAdminError when the org would keep zero ACTIVE Admins, and via
+   * SoleLeadError when the target is the last lead of any project (the
+   * target's lead-projects are locked sorted before the re-count, closing
+   * the race against the project-removal path — plan §4.1).
    */
   async removeMember(membershipId: string): Promise<RemoveMemberResult> {
     try {
@@ -362,6 +376,38 @@ export class MembersRepository {
           .for('update');
         const row = locked[0];
         if (row === undefined) return { outcome: 'not_found' as const };
+
+        // Pre-delete: the FK cascade would silently strip the target's
+        // project rows, so every project where they are a lead must keep
+        // ≥1 lead afterwards. Lock order: members-lock → project-locks
+        // sorted ascending by projectId (the project path takes only the
+        // project lock — the graph stays acyclic).
+        if (row.status === 'ACTIVE' && row.userId !== null) {
+          const leadProjects = await tx
+            .select({ projectId: projectMembers.projectId })
+            .from(projectMembers)
+            .where(
+              and(
+                eq(projectMembers.userId, row.userId),
+                eq(projectMembers.isLead, true),
+              ),
+            )
+            .orderBy(projectMembers.projectId);
+          for (const { projectId } of leadProjects) {
+            await this.lockProject(tx, projectId);
+            // Target row still exists — count includes them; 1 ⇒ sole lead.
+            const leads = await tx
+              .select({ count: sql<number>`count(*)::int` })
+              .from(projectMembers)
+              .where(
+                and(
+                  eq(projectMembers.projectId, projectId),
+                  eq(projectMembers.isLead, true),
+                ),
+              );
+            if ((leads[0]?.count ?? 0) <= 1) throw new SoleLeadError();
+          }
+        }
 
         await tx
           .delete(organizationMembers)
@@ -385,6 +431,7 @@ export class MembersRepository {
       });
     } catch (error) {
       if (error instanceof LastAdminError) return { outcome: 'last_admin' };
+      if (error instanceof SoleLeadError) return { outcome: 'sole_lead' };
       throw error;
     }
   }
@@ -537,6 +584,16 @@ export class MembersRepository {
   private async lock(tx: Database | Tx): Promise<void> {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${MEMBERS_ADVISORY_LOCK_KEY})::bigint)`,
+    );
+  }
+
+  /** Same key the projects repository locks — one project, one writer. */
+  private async lockProject(
+    tx: Database | Tx,
+    projectId: string,
+  ): Promise<void> {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${projectLockKey(projectId)})::bigint)`,
     );
   }
 

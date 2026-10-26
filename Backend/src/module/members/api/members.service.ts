@@ -40,6 +40,8 @@ import {
   NOT_ACTIVE_MEMBER_STATUS,
   ORGANIZATION_REQUIRED_MESSAGE,
   ORGANIZATION_REQUIRED_STATUS,
+  PROJECT_LAST_LEAD_MESSAGE,
+  PROJECT_LAST_LEAD_STATUS,
   SELF_INVITE_MESSAGE,
   SELF_INVITE_STATUS,
   SELF_MANAGE_MESSAGE,
@@ -247,6 +249,9 @@ export class MembersService {
     const result = await this.repository.removeMember(member.id);
     if (result.outcome === 'not_found') throw this.notFound();
     if (result.outcome === 'last_admin') throw this.lastAdmin();
+    // Removal blocked: the target is the last lead of ≥1 project (the
+    // repository rolled back under the sorted project locks).
+    if (result.outcome === 'sole_lead') throw this.projectLastLead();
 
     // Post-commit, best-effort: access ends immediately; link dies.
     if (result.wasActive && result.userId !== null) {
@@ -398,6 +403,13 @@ export class MembersService {
     return new ForbiddenException({
       status: LAST_ADMIN_STATUS,
       message: LAST_ADMIN_MESSAGE,
+    });
+  }
+
+  private projectLastLead(): ForbiddenException {
+    return new ForbiddenException({
+      status: PROJECT_LAST_LEAD_STATUS,
+      message: PROJECT_LAST_LEAD_MESSAGE,
     });
   }
 
