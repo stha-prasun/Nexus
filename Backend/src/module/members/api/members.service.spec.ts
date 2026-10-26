@@ -176,6 +176,7 @@ describe('MembersService', () => {
       expect(members).toEqual([
         {
           id: 'mid-1',
+          userId: 'target-1',
           name: 'Grace Hopper',
           email: 'grace@example.com',
           role: 'Dev',

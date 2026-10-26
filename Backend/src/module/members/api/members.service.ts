@@ -57,6 +57,7 @@ import { MembersRepository } from './repositories/members.repository';
 
 export interface MemberListEntry {
   id: string;
+  userId: string | null;
   name: string | null;
   email: string;
   role: Role;
@@ -474,6 +475,7 @@ export class MembersService {
 
 const toListEntry = (member: Member): MemberListEntry => ({
   id: member.id,
+  userId: member.userId,
   name: member.name,
   email: member.email,
   role: member.role,
