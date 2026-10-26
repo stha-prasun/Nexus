@@ -5,7 +5,7 @@ export class SetProjectLeadDto {
   @ApiProperty({
     example: true,
     description:
-      'true → promote to team lead; false → demote (403 last_lead_required when they are the only one).',
+      'true → promote to team lead (Dev members only, 403 lead_role_forbidden otherwise); false → demote (403 last_lead_required when they are the only one).',
   })
   @IsBoolean()
   isLead!: boolean;

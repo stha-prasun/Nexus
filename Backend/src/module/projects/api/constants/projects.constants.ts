@@ -45,6 +45,11 @@ export const LEAD_NOT_MEMBER_STATUS = 'lead_not_member';
 export const LEAD_NOT_MEMBER_MESSAGE =
   'Every team lead must also be a project member.';
 
+/** 403 — a lead id belongs to a member whose org role is not Dev. */
+export const LEAD_ROLE_FORBIDDEN_STATUS = 'lead_role_forbidden';
+export const LEAD_ROLE_FORBIDDEN_MESSAGE =
+  'Only Dev members can be assigned as project leads.';
+
 /** 409 — the target already has a row on this project (also the 23505 race). */
 export const ALREADY_PROJECT_MEMBER_STATUS = 'already_project_member';
 export const ALREADY_PROJECT_MEMBER_MESSAGE =

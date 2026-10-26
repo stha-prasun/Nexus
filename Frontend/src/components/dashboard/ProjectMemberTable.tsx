@@ -34,8 +34,9 @@ interface ProjectMemberTableProps {
  * The member table on the project detail page (plan §6): avatar, name,
  * email, org role, lead badge and added date, with per-row controls that
  * mirror the §1.1 matrix — Admin removes anyone (not self, not sole lead),
- * PM removes Dev targets only; lead on/off for Admin/PM. HR and Dev get a
- * read-only table (`actorRole` outside Admin/PM).
+ * PM removes Dev targets only; lead on/off by Admin/PM, promotion
+ * Dev-only. HR and Dev get a read-only table (`actorRole` outside
+ * Admin/PM).
  */
 export function ProjectMemberTable({
   project,
@@ -91,7 +92,7 @@ export function ProjectMemberTable({
           {addedOn(member.addedAt)}
         </span>
         <div className="flex items-center justify-end gap-3 text-right">
-          {canManage ? (
+          {canManage && (member.isLead || member.role === 'Dev') ? (
             <button
               type="button"
               onClick={() => onToggleLead(member, !member.isLead)}

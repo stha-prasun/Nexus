@@ -57,7 +57,7 @@ export class ProjectsController {
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
-      'Create a project (Admin/PM); creator is auto-added, ≥1 explicit lead required (plan §1)',
+      'Create a project (Admin/PM); creator is auto-added, ≥1 explicit Dev lead required (plan §1)',
   })
   @ApiCreatedResponse({ type: GetProjectResponseDto })
   @ApiBadRequestResponse({
@@ -77,7 +77,7 @@ export class ProjectsController {
   })
   @ApiForbiddenResponse({
     description:
-      '403 { status: "not_org_member" | "project_member_role_forbidden" | "role_forbidden" | "not_active_member", message }',
+      '403 { status: "not_org_member" | "project_member_role_forbidden" | "lead_role_forbidden" | "role_forbidden" | "not_active_member", message }',
     ...example(
       'not_org_member',
       'grace@example.com is not an active member of the organization. Invite them to the organization first.',
@@ -287,7 +287,7 @@ export class ProjectsController {
   @Roles('Admin', 'PM')
   @ApiOperation({
     summary:
-      'Promote/demote a team lead — same-value is a 200 no-op; demoting the last lead rolls back (403)',
+      'Promote/demote a team lead (promotion is Dev-only) — same-value is a 200 no-op; demoting the last lead rolls back (403)',
   })
   @ApiOkResponse({ type: GetProjectResponseDto })
   @ApiNotFoundResponse({
@@ -300,7 +300,7 @@ export class ProjectsController {
   })
   @ApiForbiddenResponse({
     description:
-      '403 { status: "last_lead_required" | "role_forbidden" | "not_active_member", message }',
+      '403 { status: "lead_role_forbidden" | "last_lead_required" | "role_forbidden" | "not_active_member", message }',
     ...example(
       'last_lead_required',
       'A project must keep at least one team lead. Promote another lead first.',

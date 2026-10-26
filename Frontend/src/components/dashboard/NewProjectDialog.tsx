@@ -33,8 +33,9 @@ interface NewProjectDialogProps {
 /**
  * Create-project dialog (plan §6): name, fixed color swatches, org-roster
  * member picker (ACTIVE, role ≠ HR, the creator excluded — they're
- * auto-added), and a lead toggle per member. The ≥1-lead rule is enforced
- * client-side before the POST and re-checked by the server.
+ * auto-added), and a lead toggle per Dev member (only Devs can lead). The
+ * ≥1-Dev-lead rule is enforced client-side before the POST and re-checked
+ * by the server.
  */
 export function NewProjectDialog({
   open,
@@ -43,7 +44,6 @@ export function NewProjectDialog({
 }: NewProjectDialogProps) {
   const dispatch = useAppDispatch();
   const authUser = useAppSelector((state) => state.auth.user);
-  const authUserId = authUser?.id;
   const { members } = useMembers();
   const dialogRef = useRef<HTMLDialogElement>(null);
 
@@ -54,17 +54,17 @@ export function NewProjectDialog({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Fresh state on every open — the creator defaults to lead so the
-  // "at least one lead" rule holds even with an empty roster.
+  // Fresh state on every open — leads start empty because only Dev members
+  // can lead (the Admin/PM creator never does).
   useEffect(() => {
     if (!open) return;
     setName('');
     setColor(COLORS[0]);
     setSelected(new Set());
-    setLeads(new Set(authUserId ? [authUserId] : []));
+    setLeads(new Set());
     setError('');
     setBusy(false);
-  }, [open, authUserId]);
+  }, [open]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -120,7 +120,7 @@ export function NewProjectDialog({
       return;
     }
     if (leads.size === 0) {
-      setError('Pick at least one team lead.');
+      setError('Add a Dev member and mark them as the team lead.');
       return;
     }
     setBusy(true);
@@ -225,15 +225,6 @@ export function NewProjectDialog({
                     <span className="font-semibold">{authUser.name}</span>{' '}
                     <span className="text-ink-soft">(you · auto-added)</span>
                   </span>
-                  <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink-soft">
-                    <input
-                      type="checkbox"
-                      checked={leads.has(authUser.id)}
-                      onChange={() => toggleLead(authUser.id)}
-                      className="h-3.5 w-3.5 accent-cobalt"
-                    />
-                    Lead
-                  </label>
                 </li>
               ) : null}
               {candidates.map((row) => {
@@ -267,7 +258,7 @@ export function NewProjectDialog({
                       </span>
                       <RoleBadge role={toRoleKey(row.role)} />
                     </label>
-                    {isSelected ? (
+                    {isSelected && row.role === 'Dev' ? (
                       <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-xs font-semibold text-ink-soft">
                         <input
                           type="checkbox"
@@ -283,13 +274,14 @@ export function NewProjectDialog({
               })}
               {candidates.length === 0 && authUser ? (
                 <li className="px-2 py-2 text-sm text-ink-soft">
-                  No other eligible members — you&apos;ll lead this project.
+                  No other eligible members — a project needs at least one Dev
+                  as lead.
                 </li>
               ) : null}
             </ul>
             <p className="mt-1.5 text-[13px] text-ink-soft">
-              Only active organization members appear here. At least one lead is
-              required.
+              Only active organization members appear here. At least one Dev
+              must be marked as lead.
             </p>
           </div>
         </div>

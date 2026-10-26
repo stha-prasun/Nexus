@@ -50,7 +50,7 @@ export class CreateProjectDto {
     type: [String],
     example: ['00000000-0000-4000-8000-000000000031'],
     description:
-      'Required, non-empty. Every id must be in memberUserIds or the creator — creation needs at least one explicit lead (plan §1).',
+      'Required, non-empty. Every id must be a project member with the Dev org role — only Devs can be team leads (403 lead_role_forbidden otherwise).',
   })
   @IsArray()
   @ArrayNotEmpty()

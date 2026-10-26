@@ -324,34 +324,55 @@ describe('ProjectsService', () => {
       );
     });
 
-    it('the creator becomes a lead when explicitly listed in leadUserIds', async () => {
+    it('403 lead_role_forbidden when the creator (non-Dev) is listed as a lead', async () => {
       repository.findActiveOrgMemberships.mockResolvedValue([
         membershipFor(admin),
       ]);
 
-      await service.create(createDto({ leadUserIds: [admin.userId] }), admin);
-
-      expect(repository.insertProjectWithMembers).toHaveBeenCalledWith(
-        expect.anything(),
-        [
-          {
-            organizationMemberId: `om-${admin.userId}`,
-            userId: admin.userId,
-            isLead: true,
-            addedByUserId: null,
-          },
-        ],
+      await expectStatus(
+        service.create(createDto({ leadUserIds: [admin.userId] }), admin),
+        'lead_role_forbidden',
+        403,
       );
+      expect(repository.insertProjectWithMembers).not.toHaveBeenCalled();
     });
 
-    it('PM may create', async () => {
-      repository.findActiveOrgMemberships.mockResolvedValue([
-        membershipFor(pm),
-      ]);
+    it('PM may create with a Dev lead', async () => {
+      repository.findActiveOrgMemberships.mockImplementation(
+        async (_orgId: string, userIds: string[]) =>
+          userIds.map((userId) =>
+            membershipFor(userId === pm.userId ? pm : dev),
+          ),
+      );
 
-      await service.create(createDto({ leadUserIds: [pm.userId] }), pm);
+      await service.create(
+        createDto({
+          memberUserIds: [dev.userId],
+          leadUserIds: [dev.userId],
+        }),
+        pm,
+      );
 
       expect(repository.insertProjectWithMembers).toHaveBeenCalled();
+    });
+
+    it('403 lead_role_forbidden when a member lead is not a Dev', async () => {
+      repository.findActiveOrgMemberships.mockImplementation(
+        async (_orgId: string, userIds: string[]) =>
+          userIds.map((userId) =>
+            membershipFor(userId === pm.userId ? pm : admin),
+          ),
+      );
+
+      await expectStatus(
+        service.create(
+          createDto({ memberUserIds: [pm.userId], leadUserIds: [pm.userId] }),
+          admin,
+        ),
+        'lead_role_forbidden',
+        403,
+      );
+      expect(repository.insertProjectWithMembers).not.toHaveBeenCalled();
     });
   });
 
@@ -779,13 +800,24 @@ describe('ProjectsService', () => {
     it('promotion is a plain update', async () => {
       repository.findProjectById.mockResolvedValue(projectView());
 
-      await service.setLead('proj-1', pm.userId, { isLead: true }, admin);
+      await service.setLead('proj-1', dev.userId, { isLead: true }, admin);
 
       expect(repository.setLead).toHaveBeenCalledWith(
         'proj-1',
-        pm.userId,
+        dev.userId,
         true,
       );
+    });
+
+    it('403 lead_role_forbidden when promoting a non-Dev member', async () => {
+      repository.findProjectById.mockResolvedValue(projectView());
+
+      await expectStatus(
+        service.setLead('proj-1', pm.userId, { isLead: true }, admin),
+        'lead_role_forbidden',
+        403,
+      );
+      expect(repository.setLead).not.toHaveBeenCalled();
     });
 
     it('403 last_lead_required when demoting the final lead', async () => {
@@ -816,7 +848,7 @@ describe('ProjectsService', () => {
 
       const result = await service.setLead(
         'proj-1',
-        pm.userId,
+        dev.userId,
         { isLead: true },
         admin,
       );

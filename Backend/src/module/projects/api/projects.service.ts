@@ -18,6 +18,8 @@ import {
   LAST_LEAD_REQUIRED_STATUS,
   LEAD_NOT_MEMBER_MESSAGE,
   LEAD_NOT_MEMBER_STATUS,
+  LEAD_ROLE_FORBIDDEN_MESSAGE,
+  LEAD_ROLE_FORBIDDEN_STATUS,
   NOT_ORG_MEMBER_STATUS,
   notOrgMemberMessage,
   ORGANIZATION_REQUIRED_MESSAGE,
@@ -126,6 +128,12 @@ export class ProjectsService {
           message: PROJECT_MEMBER_ROLE_FORBIDDEN_MESSAGE,
         });
       }
+      if (leadIds.includes(userId) && membership.role !== 'Dev') {
+        throw new ForbiddenException({
+          status: LEAD_ROLE_FORBIDDEN_STATUS,
+          message: LEAD_ROLE_FORBIDDEN_MESSAGE,
+        });
+      }
       extras.push({
         organizationMemberId: membership.organizationMemberId,
         userId,
@@ -134,7 +142,14 @@ export class ProjectsService {
       });
     }
 
-    // Creator is auto-added as a member — a lead only when explicitly listed.
+    // Creator is auto-added as a member — leads must be Devs, so a non-Dev
+    // creator listed in leadUserIds is rejected.
+    if (leadIds.includes(actor.userId) && creator.role !== 'Dev') {
+      throw new ForbiddenException({
+        status: LEAD_ROLE_FORBIDDEN_STATUS,
+        message: LEAD_ROLE_FORBIDDEN_MESSAGE,
+      });
+    }
     const project = this.factory.create(dto, org.id, actor.userId);
     return this.repository.insertProjectWithMembers(project, [
       {
@@ -277,9 +292,10 @@ export class ProjectsService {
   }
 
   /**
-   * Promote/demote a member's lead flag. Same-value is a 200 no-op with no
-   * transaction (mirror of same-role PATCH in members); demotion runs under
-   * the per-project lock so the last lead can never be stripped.
+   * Promote/demote a member's lead flag — promotion is Dev-only (403
+   * lead_role_forbidden). Same-value is a 200 no-op with no transaction
+   * (mirror of same-role PATCH in members); demotion runs under the
+   * per-project lock so the last lead can never be stripped.
    */
   async setLead(
     id: string,
@@ -290,6 +306,12 @@ export class ProjectsService {
     const project = await this.requireManageable(id, actor);
     const target = project.members.find((member) => member.userId === userId);
     if (target === undefined) throw this.memberNotFound();
+    if (dto.isLead && target.role !== 'Dev') {
+      throw new ForbiddenException({
+        status: LEAD_ROLE_FORBIDDEN_STATUS,
+        message: LEAD_ROLE_FORBIDDEN_MESSAGE,
+      });
+    }
     if (target.isLead === dto.isLead) return project;
 
     const result = await this.repository.setLead(
