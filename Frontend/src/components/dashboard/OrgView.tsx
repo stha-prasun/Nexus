@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Member, Org, Project, RoleKey } from '@/lib/dashboard';
+import type { Project } from '@/lib/api';
+import type { Member, Org, RoleKey } from '@/lib/dashboard';
 import {
   accessSummary,
   BTN,
@@ -25,6 +26,11 @@ interface OrgViewProps {
   canManageOrg: boolean;
   /** Invite/remove members and change their roles (server-enforced §1.1 matrix). */
   canManageMembers: boolean;
+  /** Project CTAs — Admin | PM only; HR is read-only for projects. */
+  canManageProjects: boolean;
+  /** Non-empty while GET /projects failed — shown instead of the empty state. */
+  projectsError?: string[];
+  onRetryProjects?: () => void;
   graphKey: number;
   onAddMember: () => void;
   onRemoveMember: (index: number) => void;
@@ -32,6 +38,8 @@ interface OrgViewProps {
   onEditOrg: () => void;
   onDeleteOrg: () => void;
   onNewProject: () => void;
+  /** "Open board" → the project detail page. */
+  onOpenProject: (id: string) => void;
 }
 
 function Avatar({
@@ -351,18 +359,16 @@ function EmptyProjects({
  */
 function SingleProject({
   project,
-  members,
   canManage,
   onNewProject,
+  onOpenProject,
 }: {
   project: Project;
-  members: Member[];
   canManage: boolean;
   onNewProject: () => void;
+  onOpenProject: (id: string) => void;
 }) {
-  const people = project.people
-    .map((idx) => members[idx])
-    .filter((member): member is Member => Boolean(member));
+  const people = project.members;
 
   return (
     <div className="border border-ink">
@@ -381,7 +387,7 @@ function SingleProject({
             <div className="flex -space-x-px">
               {people.slice(0, 6).map((member) => (
                 <Avatar
-                  key={member.email}
+                  key={member.userId}
                   name={member.name}
                   size="h-9 w-9 text-xs"
                   extra="ring-2 ring-white"
@@ -395,6 +401,7 @@ function SingleProject({
         </div>
         <button
           type="button"
+          onClick={() => onOpenProject(project.id)}
           className="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 text-left font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0"
         >
           Open board
@@ -428,6 +435,9 @@ export function OrgView({
   myEmail,
   canManageOrg,
   canManageMembers,
+  canManageProjects,
+  projectsError,
+  onRetryProjects,
   graphKey,
   onAddMember,
   onRemoveMember,
@@ -435,6 +445,7 @@ export function OrgView({
   onEditOrg,
   onDeleteOrg,
   onNewProject,
+  onOpenProject,
 }: OrgViewProps) {
   const rows = members.map((member, i) => {
     const isMe = myEmail !== undefined && member.email === myEmail;
@@ -500,29 +511,38 @@ export function OrgView({
   });
 
   const cells = projects.map((project, n) => (
-    <li key={project.name} className="bg-white p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-ink-soft">{pad2(n + 1)}</span>
-        <span className="h-3 w-3" style={{ background: project.color }} />
-      </div>
-      <p className="mt-8 font-display text-xl font-bold tracking-tight">
-        {project.name}
-      </p>
-      <div className="mt-4 flex items-center justify-between">
-        <div className="flex -space-x-px">
-          {project.people.slice(0, 4).map((idx) => (
-            <Avatar
-              key={idx}
-              name={members[idx]?.name || '?'}
-              size="h-7 w-7 text-[10px]"
-              extra="ring-1 ring-white"
-            />
-          ))}
+    <li key={project.id} className="bg-white">
+      <button
+        type="button"
+        onClick={() => onOpenProject(project.id)}
+        className="block w-full p-5 text-left transition-colors hover:bg-paper/70"
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-ink-soft">{pad2(n + 1)}</span>
+          <span className="h-3 w-3" style={{ background: project.color }} />
         </div>
-        <span className="text-sm text-ink-soft">
-          {project.people.length} members
+        <p className="mt-8 font-display text-xl font-bold tracking-tight">
+          {project.name}
+        </p>
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex -space-x-px">
+            {project.members.slice(0, 4).map((member) => (
+              <Avatar
+                key={member.userId}
+                name={member.name}
+                size="h-7 w-7 text-[10px]"
+                extra="ring-1 ring-white"
+              />
+            ))}
+          </div>
+          <span className="text-sm text-ink-soft">
+            {project.members.length} members
+          </span>
+        </div>
+        <span className="mt-3 block text-xs font-semibold text-cobalt">
+          Open board →
         </span>
-      </div>
+      </button>
     </li>
   ));
 
@@ -530,7 +550,7 @@ export function OrgView({
   // grid; the zero-project panel and single-project card are designed
   // layouts of their own.
   if (projects.length > 1) {
-    if (canManageMembers) {
+    if (canManageProjects) {
       cells.push(
         <li key="new-project" className="bg-white">
           <button
@@ -655,18 +675,36 @@ export function OrgView({
             {pad2(projects.length)}
           </span>
         </h2>
-        {projects.length === 0 ? (
+        {projectsError && projectsError.length > 0 && projects.length === 0 ? (
+          <div className="flex flex-col items-center gap-3 border border-ink px-6 py-10 text-center">
+            <p className="text-[15px] font-semibold text-ink">
+              Couldn&apos;t load projects.
+            </p>
+            <p className="max-w-sm text-sm text-ink-soft">
+              {projectsError.join(' ')}
+            </p>
+            {onRetryProjects ? (
+              <button
+                type="button"
+                onClick={onRetryProjects}
+                className="mt-1 bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+              >
+                Retry
+              </button>
+            ) : null}
+          </div>
+        ) : projects.length === 0 ? (
           <EmptyProjects
             orgName={org.name}
-            canManage={canManageMembers}
+            canManage={canManageProjects}
             onCreateProject={onNewProject}
           />
         ) : projects.length === 1 ? (
           <SingleProject
             project={projects[0]}
-            members={members}
-            canManage={canManageMembers}
+            canManage={canManageProjects}
             onNewProject={onNewProject}
+            onOpenProject={onOpenProject}
           />
         ) : (
           <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">

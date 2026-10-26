@@ -1,12 +1,13 @@
 import { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import type { Organization } from '@/lib/api';
+import type { Organization, Project } from '@/lib/api';
 import type { AppDispatch, RootState } from '@/store';
 import { fetchMembers, refreshMembers } from '@/store/slices/membersSlice';
 import {
   fetchOrganization,
   refreshOrganization,
 } from '@/store/slices/orgSlice';
+import { fetchProjects, refreshProjects } from '@/store/slices/projectsSlice';
 
 export const useAppDispatch = useDispatch.withTypes<AppDispatch>();
 export const useAppSelector = useSelector.withTypes<RootState>();
@@ -62,4 +63,31 @@ export function useMembers() {
   const refresh = (): Promise<typeof members> => dispatch(refreshMembers());
 
   return { members, status, error, retry, refresh };
+}
+
+/**
+ * The project list: fetched once an org exists (never while `org` is null).
+ * Admin/HR see every project; PM/Dev see only their memberships — the server
+ * decides, the client just renders. `refresh` revalidates on demand without
+ * touching `status`, so the grid never flickers.
+ */
+export function useProjects() {
+  const dispatch = useAppDispatch();
+  const org = useAppSelector((state) => state.org.org);
+  const status = useAppSelector((state) => state.projects.status);
+  const projects = useAppSelector((state) => state.projects.projects);
+  const error = useAppSelector((state) => state.projects.error);
+
+  useEffect(() => {
+    if (org && status === 'unknown') void dispatch(fetchProjects());
+  }, [dispatch, org, status]);
+
+  const retry = (): void => {
+    void dispatch(fetchProjects());
+  };
+
+  /** Always GETs fresh; rethrows failures for the caller to toast. */
+  const refresh = (): Promise<Project[]> => dispatch(refreshProjects());
+
+  return { projects, status, error, retry, refresh };
 }

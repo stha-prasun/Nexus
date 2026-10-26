@@ -8,6 +8,7 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { SignupPage } from '@/pages/SignupPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
 
@@ -44,6 +45,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <DashboardPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'dashboard/projects/:id',
+        element: (
+          <RequireAuth>
+            <ProjectDetailPage />
           </RequireAuth>
         ),
       },

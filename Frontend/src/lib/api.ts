@@ -291,6 +291,8 @@ export type MemberStatus = 'INVITED' | 'ACTIVE';
 export interface MemberListItem {
   /** Membership row id — the handle for role change / removal. */
   id: string;
+  /** Account id for project-member routes; null while INVITED with no account yet. */
+  userId: string | null;
   /** Null while INVITED with no account yet — the UI falls back to the email local-part. */
   name: string | null;
   email: string;
@@ -367,5 +369,121 @@ export function acceptInvite(token: string): Promise<{ message: string }> {
   return apiRequest<{ message: string }>(
     `/members/invites/${encodeURIComponent(token)}/accept`,
     'POST',
+  );
+}
+
+// ----------------------------------------------------------------- projects
+
+/** One member row of a project — org role included for the table column. */
+export interface ProjectMember {
+  /** User id — the handle for lead toggle / removal routes. */
+  userId: string;
+  name: string;
+  email: string;
+  /** The member's organization role (users.role). */
+  role: Role;
+  /** Team-lead flag — a project always keeps ≥1 lead (server invariant). */
+  isLead: boolean;
+  addedAt: string;
+}
+
+/** Full API project shape — members render avatars and counts. */
+export interface Project {
+  id: string;
+  name: string;
+  color: string;
+  /** Display credit only — the creator keeps no rights once removed. */
+  createdByUserId: string;
+  createdByName: string;
+  /** Leads first, then insertion order. */
+  members: ProjectMember[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateProjectPayload {
+  name: string;
+  color?: string;
+  /** Extra members beyond the creator (who is always added). */
+  memberUserIds?: string[];
+  /** Required, non-empty; each id must be a member (memberUserIds ∪ creator). */
+  leadUserIds: string[];
+}
+
+/** Admin/HR → all projects; PM/Dev → only projects they belong to. */
+export function listProjects(): Promise<{ projects: Project[] }> {
+  return apiRequest<{ projects: Project[] }>('/projects', 'GET');
+}
+
+/** 404 project_not_found when missing or invisible (indistinguishable). */
+export function getProject(id: string): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>(
+    `/projects/${encodeURIComponent(id)}`,
+    'GET',
+  );
+}
+
+/** Admin/PM only — creator is auto-added; ≥1 explicit lead required. */
+export function createProject(
+  payload: CreateProjectPayload,
+): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>('/projects', 'POST', payload);
+}
+
+export function updateProject(
+  id: string,
+  payload: { name?: string; color?: string },
+): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>(
+    `/projects/${encodeURIComponent(id)}`,
+    'PATCH',
+    payload,
+  );
+}
+
+/** 200 { message } — memberships cascade with the project. */
+export function deleteProject(id: string): Promise<{ message: string }> {
+  return apiRequest<{ message: string }>(
+    `/projects/${encodeURIComponent(id)}`,
+    'DELETE',
+  );
+}
+
+/** Target must be an ACTIVE org member (HR forbidden), not already on it. */
+export function addProjectMember(
+  projectId: string,
+  userId: string,
+): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>(
+    `/projects/${encodeURIComponent(projectId)}/members`,
+    'POST',
+    { userId },
+  );
+}
+
+/**
+ * Self-removal → 403 self_remove_forbidden; PM may remove Dev targets only;
+ * last-lead removal → 403 last_lead_required.
+ */
+export function removeProjectMember(
+  projectId: string,
+  userId: string,
+): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>(
+    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}`,
+    'DELETE',
+  );
+}
+
+/** Demoting the last lead → 403 last_lead_required. */
+export function setProjectLead(
+  projectId: string,
+  userId: string,
+  isLead: boolean,
+): Promise<{ project: Project }> {
+  return apiRequest<{ project: Project }>(
+    `/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(userId)}/lead`,
+    'PATCH',
+    { isLead },
   );
 }

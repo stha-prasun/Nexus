@@ -101,12 +101,6 @@ export const displayMember = (row: MemberListItem): Member => ({
   invited: row.status === 'INVITED',
 });
 
-export interface Project {
-  name: string;
-  color: string;
-  people: number[];
-}
-
 export interface Org {
   name: string;
   slug: string;
@@ -122,12 +116,12 @@ export const CURRENT_USER: Member = {
 export interface DashboardState {
   viewAs: RoleKey;
   members: Member[];
-  projects: Project[];
 }
 
 /**
- * Demo team data — members/projects have no backend yet. The real
- * organization lives in the Redux `org` slice (fetched from the API).
+ * Demo team data — members have no backend yet. The real organization
+ * lives in the Redux `org` slice and real projects in the `projects`
+ * slice (both fetched from the API).
  */
 export const createDemoState = (): DashboardState => ({
   viewAs: 'pm',
@@ -137,10 +131,6 @@ export const createDemoState = (): DashboardState => ({
     { name: 'Priya Patel', email: 'priya@acme.com', role: 'dev' },
     { name: 'Lena Wu', email: 'lena@acme.com', role: 'dev' },
     { name: 'Rahul', email: 'rahul@acme.com', role: 'dev', invited: true },
-  ],
-  projects: [
-    { name: 'Website relaunch', color: '#1F2FE0', people: [0, 1, 2, 3] },
-    { name: 'Mobile app', color: '#2FB67C', people: [0, 2, 3] },
   ],
 });
 

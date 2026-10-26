@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
+import { NewProjectDialog } from '@/components/dashboard/NewProjectDialog';
 import { NoOrgView } from '@/components/dashboard/NoOrgView';
 import { OrgView, RolePicker } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
@@ -16,11 +17,10 @@ import {
   removeMember,
   updateOrganization,
 } from '@/lib/api';
-import type { DashboardState, Member, Org, RoleKey } from '@/lib/dashboard';
+import type { Member, Org, RoleKey } from '@/lib/dashboard';
 import {
   accessSummary,
   CURRENT_USER,
-  createDemoState,
   displayMember,
   EMAIL_PATTERN,
   INPUT,
@@ -36,10 +36,12 @@ import {
   useAppSelector,
   useMembers,
   useOrganization,
+  useProjects,
 } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
 import { clearMembers } from '@/store/slices/membersSlice';
 import { clearOrg, removeOrg, setOrg } from '@/store/slices/orgSlice';
+import { clearProjects } from '@/store/slices/projectsSlice';
 
 function Field({
   htmlFor,
@@ -111,7 +113,6 @@ function EditOrgFields({
 }
 
 export function DashboardPage() {
-  const [state, setState] = useState<DashboardState>(createDemoState);
   const [viewKey, setViewKey] = useState(0);
   const { show, element: toastElement } = useToast();
   const { ask, element: dialogElement } = useDialog();
@@ -132,6 +133,13 @@ export function DashboardPage() {
     retry: retryMembers,
     refresh: refreshRoster,
   } = useMembers();
+  const {
+    projects,
+    error: projectsError,
+    retry: retryProjects,
+  } = useProjects();
+
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
 
   /** Real roster once loaded; the demo list only backstops the no-org views. */
   const displayMembers: Member[] =
@@ -146,6 +154,7 @@ export function DashboardPage() {
       } catch {
         // Best-effort server-side invalidation; the cookie still dies at TTL.
       }
+      dispatch(clearProjects());
       dispatch(clearMembers());
       dispatch(clearOrg());
       dispatch(setAnonymous());
@@ -175,12 +184,14 @@ export function DashboardPage() {
     }
   };
 
-  const { projects } = state;
   // Real session role drives gating — the demo `viewAs` state no longer does.
   const roleKey: RoleKey = authUser ? toRoleKey(authUser.role) : 'pm';
   const canManageOrg = authUser?.role === 'Admin';
   const canManageMembers =
     authUser != null && ['Admin', 'HR', 'PM'].includes(authUser.role);
+  // Projects: Admin + PM only — HR has read-only oversight (§1.1 matrix).
+  const canManageProjects =
+    authUser != null && ['Admin', 'PM'].includes(authUser.role);
 
   useEffect(() => {
     document.title = org
@@ -397,10 +408,7 @@ export function DashboardPage() {
     }
     dispatch(removeOrg());
     dispatch(clearMembers());
-    setState((current) => ({
-      ...current,
-      projects: [],
-    }));
+    dispatch(clearProjects());
     show('Organization deleted');
   };
 
@@ -413,16 +421,7 @@ export function DashboardPage() {
     dispatch(setOrg(organization));
     // The roster was never fetchable pre-org — prime a fresh load.
     dispatch(clearMembers());
-    setState((current) => ({
-      ...current,
-      viewAs: 'admin',
-      members: [
-        authUser
-          ? { name: authUser.name, email: authUser.email, role: 'admin' }
-          : { ...(current.members[0] ?? { ...CURRENT_USER }), role: 'admin' },
-      ],
-      projects: [],
-    }));
+    dispatch(clearProjects());
     bumpGraph();
     show('Organization created. Add your first members.');
   };
@@ -514,13 +513,19 @@ export function DashboardPage() {
               myEmail={authUser?.email}
               canManageOrg={canManageOrg}
               canManageMembers={canManageMembers}
+              canManageProjects={canManageProjects}
+              projectsError={projectsError}
+              onRetryProjects={retryProjects}
               graphKey={viewKey}
               onAddMember={() => void handleAddMember()}
               onRemoveMember={(index) => void handleRemoveMember(index)}
               onRoleChange={handleRoleChange}
               onEditOrg={() => void handleEditOrg()}
               onDeleteOrg={() => void handleDeleteOrg()}
-              onNewProject={() => show('Projects page is next')}
+              onNewProject={() => setNewProjectOpen(true)}
+              onOpenProject={(projectId) =>
+                navigate(`/dashboard/projects/${projectId}`)
+              }
             />
           )
         ) : canManageOrg ? (
@@ -534,6 +539,14 @@ export function DashboardPage() {
           />
         )}
       </div>
+      <NewProjectDialog
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={(project) => {
+          setNewProjectOpen(false);
+          show(`Project “${project.name}” created`);
+        }}
+      />
       {dialogElement}
       {toastElement}
     </AppShell>
