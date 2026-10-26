@@ -64,7 +64,7 @@ export function AddProjectMemberDialog({
     (row) =>
       row.status === 'ACTIVE' &&
       row.role !== 'HR' &&
-      row.userId !== null &&
+      typeof row.userId === 'string' &&
       !onProject.has(row.userId),
   );
 
