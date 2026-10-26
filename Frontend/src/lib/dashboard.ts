@@ -5,8 +5,19 @@ export type RoleKey = 'pm' | 'admin' | 'dev' | 'hr';
 /** Session role from the auth store ('PM' | 'Dev' | 'Admin' | 'HR') → dashboard key. */
 export const toRoleKey = (role: Role): RoleKey => role.toLowerCase() as RoleKey;
 
-/** Dashboard role key → API role (invite payloads, role-change PATCH). */
-export const toApiRole = (key: RoleKey): Role => key.toUpperCase() as Role;
+/**
+ * Dashboard role key → API role (invite payloads, role-change PATCH).
+ * Explicit map, not `toUpperCase()` — the API enum is mixed-case
+ * (`Dev`, `Admin`), so uppercasing sent `DEV`/`ADMIN` and got 400.
+ */
+const API_ROLE: Record<RoleKey, Role> = {
+  pm: 'PM',
+  dev: 'Dev',
+  admin: 'Admin',
+  hr: 'HR',
+};
+
+export const toApiRole = (key: RoleKey): Role => API_ROLE[key];
 
 export const ROLES: Record<
   RoleKey,
