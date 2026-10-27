@@ -31,7 +31,8 @@ interface NewProjectDialogProps {
 }
 
 /**
- * Create-project dialog (plan §6): name, fixed color swatches, org-roster
+ * Create-project dialog (plan §6): name, optional description, fixed color
+ * swatches, org-roster
  * member picker (ACTIVE, role ≠ HR, the creator excluded — they're
  * auto-added), and a lead toggle per Dev member (only Devs can lead). The
  * ≥1-Dev-lead rule is enforced client-side before the POST and re-checked
@@ -48,6 +49,7 @@ export function NewProjectDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
 
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [color, setColor] = useState(COLORS[0]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [leads, setLeads] = useState<Set<string>>(new Set());
@@ -59,6 +61,7 @@ export function NewProjectDialog({
   useEffect(() => {
     if (!open) return;
     setName('');
+    setDescription('');
     setColor(COLORS[0]);
     setSelected(new Set());
     setLeads(new Set());
@@ -129,6 +132,7 @@ export function NewProjectDialog({
       try {
         const { project } = await createProject({
           name: trimmed,
+          description: description.trim() || undefined,
           color,
           memberUserIds: [...selected],
           leadUserIds: [...leads],
@@ -175,6 +179,25 @@ export function NewProjectDialog({
               onChange={(event) => setName(event.target.value)}
               placeholder="Website relaunch"
               maxLength={100}
+              className={INPUT}
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="np-description"
+              className="mb-1.5 block font-semibold text-ink"
+            >
+              Description{' '}
+              <span className="font-normal text-ink-soft">(optional)</span>
+            </label>
+            <textarea
+              id="np-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="What is this project about?"
+              maxLength={500}
+              rows={3}
               className={INPUT}
             />
           </div>

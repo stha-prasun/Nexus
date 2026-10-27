@@ -64,15 +64,18 @@ const COLORS = [
   '#0E7490',
 ];
 
-/** Controlled body for the rename/recolor dialog (FormData submit path). */
+/** Controlled body for the rename/re-describe/recolor dialog. */
 function EditProjectFields({
   initialName,
+  initialDescription,
   initialColor,
 }: {
   initialName: string;
+  initialDescription: string | null;
   initialColor: string;
 }) {
   const [name, setName] = useState(initialName);
+  const [description, setDescription] = useState(initialDescription ?? '');
   const [color, setColor] = useState(
     COLORS.includes(initialColor) ? initialColor : COLORS[0],
   );
@@ -86,6 +89,18 @@ function EditProjectFields({
           value={name}
           maxLength={100}
           onChange={(event) => setName(event.target.value)}
+          className={INPUT}
+        />
+      </Field>
+      <Field htmlFor="ep-description" label="Description (optional)">
+        <textarea
+          id="ep-description"
+          name="description"
+          value={description}
+          maxLength={500}
+          rows={3}
+          placeholder="What is this project about?"
+          onChange={(event) => setDescription(event.target.value)}
           className={INPUT}
         />
       </Field>
@@ -222,6 +237,7 @@ export function ProjectDetailPage() {
       body: (
         <EditProjectFields
           initialName={project.name}
+          initialDescription={project.description}
           initialColor={project.color}
         />
       ),
@@ -234,10 +250,13 @@ export function ProjectDetailPage() {
     if (!result) return;
     const name = String(result.get('name') ?? '').trim();
     const color = String(result.get('color') ?? '');
+    const description = String(result.get('description') ?? '').trim();
     try {
       const { project: updated } = await updateProject(project.id, {
         name,
         color,
+        // Blank clears it — the server stores null either way.
+        description: description || null,
       });
       adopt(updated);
       show('Project updated');
@@ -441,6 +460,11 @@ export function ProjectDetailPage() {
           >
             {project.name}
           </h1>
+          {project.description ? (
+            <p className="mt-3 max-w-xl pl-2 text-[15px] leading-relaxed text-ink-soft">
+              {project.description}
+            </p>
+          ) : null}
           <div className="mt-6 flex flex-wrap items-center gap-4 pl-2">
             <div className="flex -space-x-px">
               {members.slice(0, 6).map((member) => (

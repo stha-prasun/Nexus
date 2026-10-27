@@ -14,8 +14,9 @@ interface SidebarProps {
 }
 
 /**
- * Projects / My tasks aren't pages yet: padlocked with no organization
- * ("Create an organization first"), a "Soon" badge once one exists.
+ * My tasks isn't a page yet: padlocked with no organization ("Create an
+ * organization first"), a "Soon" badge once one exists. Projects uses a real
+ * NavLink instead — see below.
  */
 function NavPlaceholder({
   icon,
@@ -105,6 +106,7 @@ export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
       <nav className="space-y-px px-3" aria-label="Main">
         <NavLink
           to="/dashboard"
+          end
           className={({ isActive }) =>
             cn(
               'flex items-center gap-3 px-3 py-2.5',
@@ -117,11 +119,31 @@ export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
           <OrgIcon />
           Organization
         </NavLink>
-        <NavPlaceholder
-          icon={<ProjectsIcon />}
-          label="Projects"
-          locked={!org}
-        />
+        {org ? (
+          <NavLink
+            to="/dashboard/projects"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 px-3 py-2.5',
+                isActive
+                  ? 'bg-cobalt font-semibold text-white'
+                  : 'text-ink-soft hover:bg-paper',
+              )
+            }
+          >
+            <ProjectsIcon />
+            Projects
+          </NavLink>
+        ) : (
+          <span
+            className="flex items-center gap-3 px-3 py-2.5 text-ink-soft/60"
+            title="Create an organization first"
+          >
+            <ProjectsIcon />
+            Projects
+            <LockIcon className="ml-auto h-3.5 w-3.5" />
+          </span>
+        )}
         <NavPlaceholder icon={<TasksIcon />} label="My tasks" locked={!org} />
       </nav>
 

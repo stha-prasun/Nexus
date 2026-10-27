@@ -391,6 +391,8 @@ export interface ProjectMember {
 export interface Project {
   id: string;
   name: string;
+  /** Optional blurb — null when the project has none. */
+  description: string | null;
   color: string;
   /** Display credit only — the creator keeps no rights once removed. */
   createdByUserId: string;
@@ -403,6 +405,8 @@ export interface Project {
 
 export interface CreateProjectPayload {
   name: string;
+  /** Optional blurb shown on the projects list. */
+  description?: string;
   color?: string;
   /** Extra members beyond the creator (who is always added). */
   memberUserIds?: string[];
@@ -432,7 +436,7 @@ export function createProject(
 
 export function updateProject(
   id: string,
-  payload: { name?: string; color?: string },
+  payload: { name?: string; color?: string; description?: string | null },
 ): Promise<{ project: Project }> {
   return apiRequest<{ project: Project }>(
     `/projects/${encodeURIComponent(id)}`,
