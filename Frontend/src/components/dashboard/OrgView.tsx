@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import type { Project } from '@/lib/api';
 import type { Member, Org, RoleKey } from '@/lib/dashboard';
 import {
@@ -510,7 +511,14 @@ export function OrgView({
     );
   });
 
-  const cells = projects.map((project, n) => (
+  // The dashboard previews only the 3 most recently created projects —
+  // everything stays reachable on the Projects page (sidebar). The API
+  // returns oldest-first, so re-sort newest-first before slicing.
+  const recentProjects = [...projects]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 3);
+
+  const cells = recentProjects.map((project, n) => (
     <li key={project.id} className="bg-white">
       <button
         type="button"
@@ -666,15 +674,25 @@ export function OrgView({
       </section>
 
       <section className="mt-10" aria-labelledby="h-projects">
-        <h2
-          id="h-projects"
-          className="mb-3 font-display text-2xl font-bold tracking-tight"
-        >
-          Projects{' '}
-          <span className="ml-1 align-middle font-sans text-sm font-bold text-ink-soft">
-            {pad2(projects.length)}
-          </span>
-        </h2>
+        <div className="mb-3 flex items-end justify-between gap-4">
+          <h2
+            id="h-projects"
+            className="font-display text-2xl font-bold tracking-tight"
+          >
+            Projects{' '}
+            <span className="ml-1 align-middle font-sans text-sm font-bold text-ink-soft">
+              {pad2(projects.length)}
+            </span>
+          </h2>
+          {projects.length > recentProjects.length ? (
+            <Link
+              to="/dashboard/projects"
+              className="text-sm font-semibold text-cobalt underline-offset-2 hover:underline"
+            >
+              View all →
+            </Link>
+          ) : null}
+        </div>
         {projectsError && projectsError.length > 0 && projects.length === 0 ? (
           <div className="flex flex-col items-center gap-3 border border-ink px-6 py-10 text-center">
             <p className="text-[15px] font-semibold text-ink">
