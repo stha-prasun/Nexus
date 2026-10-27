@@ -361,10 +361,23 @@ export function ProjectsPage() {
 
   const isLeadByMe = (project: Project): boolean =>
     project.members.some((member) => member.isLead && member.userId === myId);
+  const createdByMe = (project: Project): boolean =>
+    project.createdByUserId === myId;
   const canManage = (project: Project): boolean =>
     authUser?.role === 'Admin' ||
     (authUser?.role === 'PM' &&
       project.members.some((member) => member.userId === myId));
+
+  // The second pill is role-aware — leads must be Dev members, so "I lead"
+  // only ever means something for Dev. Admin/PM create every project, so
+  // they get "Created by me"; HR has no personal relation to any project
+  // and gets no second pill.
+  const personalFilter =
+    roleKey === 'dev'
+      ? { label: 'I lead', test: isLeadByMe }
+      : roleKey === 'hr'
+        ? null
+        : { label: 'Created by me', test: createdByMe };
 
   useEffect(() => {
     document.title = 'Projects · Nexus';
@@ -403,7 +416,8 @@ export function ProjectsPage() {
     ? (projects.find((project) => project.id === membersForId) ?? null)
     : null;
   let items = all;
-  if (filter === 'mine') items = items.filter(isLeadByMe);
+  if (filter === 'mine' && personalFilter)
+    items = items.filter(personalFilter.test);
   if (q) {
     const needle = q.toLowerCase();
     items = items.filter((project) =>
@@ -547,12 +561,10 @@ export function ProjectsPage() {
               aria-label="Search projects"
               className={`${INPUT} max-w-xs py-2`}
             />
-            {canCreate ? (
-              <div className="flex border border-ink">
-                {tab('all', 'All')}
-                {tab('mine', 'I lead')}
-              </div>
-            ) : null}
+            <div className="flex border border-ink">
+              {tab('all', 'All')}
+              {personalFilter ? tab('mine', personalFilter.label) : null}
+            </div>
           </div>
         ) : null}
 
