@@ -189,21 +189,33 @@ export class ProjectsService {
     return project;
   }
 
-  /** Rename/recolor — Admin any; PM if member; empty body → 400. */
+  /** Rename/re-describe/recolor — Admin any; PM if member; empty body → 400. */
   async update(
     id: string,
     dto: UpdateProjectDto,
     actor: SessionUser,
   ): Promise<ProjectView> {
     const project = await this.requireManageable(id, actor);
-    if (dto.name === undefined && dto.color === undefined) {
+    if (
+      dto.name === undefined &&
+      dto.description === undefined &&
+      dto.color === undefined
+    ) {
       throw new BadRequestException({
         status: 'empty_update',
         message: 'Provide at least one field to update.',
       });
     }
-    const changes: { name?: string; color?: string } = {};
+    const changes: {
+      name?: string;
+      description?: string | null;
+      color?: string;
+    } = {};
     if (dto.name !== undefined) changes.name = dto.name;
+    // Blank clears it — the column is nullable, the UI shows "No description".
+    if (dto.description !== undefined) {
+      changes.description = dto.description?.trim() || null;
+    }
     if (dto.color !== undefined) changes.color = dto.color;
     // `updatedAt` is stamped by the column's `$onUpdate`.
     const updated = await this.repository.update(project.id, changes);

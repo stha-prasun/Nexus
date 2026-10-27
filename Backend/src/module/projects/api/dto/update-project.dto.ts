@@ -28,6 +28,17 @@ export class UpdateProjectDto {
   name?: string;
 
   @ApiPropertyOptional({
+    example: 'Rebuild the marketing site on the new CMS.',
+    maxLength: 500,
+    description: 'Blank or null clears the description.',
+  })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(500)
+  description?: string | null;
+
+  @ApiPropertyOptional({
     example: '#2FB67C',
     pattern: PROJECT_COLOR_PATTERN.source,
     description: 'Same pattern as create.',

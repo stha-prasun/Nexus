@@ -22,6 +22,8 @@ export class ProjectFactory {
       id: randomUUID(),
       organizationId,
       name: dto.name,
+      // Blank → null so create and update agree on "no description".
+      description: dto.description?.trim() || null,
       color: dto.color ?? DEFAULT_PROJECT_COLOR,
       createdByUserId,
       createdAt: now,

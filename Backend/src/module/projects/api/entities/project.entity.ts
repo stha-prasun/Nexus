@@ -2,6 +2,8 @@ export interface ProjectProps {
   id: string;
   organizationId: string;
   name: string;
+  /** Optional blurb — null when the project has none. */
+  description: string | null;
   color: string;
   createdByUserId: string;
   createdAt: Date;
@@ -26,6 +28,10 @@ export class Project {
 
   get name(): string {
     return this.props.name;
+  }
+
+  get description(): string | null {
+    return this.props.description;
   }
 
   get color(): string {

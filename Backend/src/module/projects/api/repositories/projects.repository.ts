@@ -29,6 +29,7 @@ export interface ProjectView {
   id: string;
   organizationId: string;
   name: string;
+  description: string | null;
   color: string;
   createdByUserId: string;
   createdByName: string;
@@ -83,6 +84,7 @@ const projectSelect = {
   id: projects.id,
   organizationId: projects.organizationId,
   name: projects.name,
+  description: projects.description,
   color: projects.color,
   createdByUserId: projects.createdByUserId,
   createdAt: projects.createdAt,
@@ -94,6 +96,7 @@ type ProjectBaseRowResolved = {
   id: string;
   organizationId: string;
   name: string;
+  description: string | null;
   color: string;
   createdByUserId: string;
   createdAt: Date;
@@ -216,6 +219,7 @@ export class ProjectsRepository {
         id: project.id,
         organizationId: project.organizationId,
         name: project.name,
+        description: project.description,
         color: project.color,
         createdByUserId: project.createdByUserId,
         createdAt: project.createdAt,
@@ -358,10 +362,10 @@ export class ProjectsRepository {
     }
   }
 
-  /** Rename/recolor; `updatedAt` is stamped by the column's `$onUpdate`. */
+  /** Rename/re-describe/recolor; `updatedAt` is stamped by `$onUpdate`. */
   async update(
     id: string,
-    changes: { name?: string; color?: string },
+    changes: { name?: string; description?: string | null; color?: string },
   ): Promise<ProjectView | null> {
     await this.db.update(projects).set(changes).where(eq(projects.id, id));
     return this.findProjectById(id);
@@ -501,6 +505,7 @@ const toProjectView = (
   id: base.id,
   organizationId: base.organizationId,
   name: base.name,
+  description: base.description,
   color: base.color,
   createdByUserId: base.createdByUserId,
   createdByName: base.createdByName,

@@ -42,6 +42,14 @@ export class ProjectResponseDto {
   @ApiProperty({ example: 'Website relaunch', minLength: 2, maxLength: 100 })
   name!: string;
 
+  @ApiProperty({
+    example: 'Rebuild the marketing site and move it to the new CMS.',
+    maxLength: 500,
+    nullable: true,
+    description: 'Optional blurb — null when the project has none.',
+  })
+  description!: string | null;
+
   @ApiProperty({ example: '#1F2FE0' })
   color!: string;
 
@@ -100,6 +108,7 @@ const toProjectMemberResponse = (
 export const toProjectResponse = (view: ProjectView): ProjectResponseDto => ({
   id: view.id,
   name: view.name,
+  description: view.description,
   color: view.color,
   createdByUserId: view.createdByUserId,
   createdByName: view.createdByName,

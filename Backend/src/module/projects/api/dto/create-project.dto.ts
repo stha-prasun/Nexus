@@ -21,6 +21,17 @@ export class CreateProjectDto {
   name!: string;
 
   @ApiPropertyOptional({
+    example: 'Rebuild the marketing site and move it to the new CMS.',
+    maxLength: 500,
+    description: 'Optional blurb shown on the projects list; omit for none.',
+  })
+  @IsOptional()
+  @Trim()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @ApiPropertyOptional({
     example: '#1F2FE0',
     pattern: PROJECT_COLOR_PATTERN.source,
     description: 'Hex `#rrggbb`; defaults to #1F2FE0 when omitted (plan §1).',

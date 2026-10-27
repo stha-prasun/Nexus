@@ -146,7 +146,7 @@ export class ProjectsController {
   @UseGuards(SessionAuthGuard, RolesGuard, ActiveMemberGuard)
   @Roles('Admin', 'PM')
   @ApiOperation({
-    summary: 'Rename/recolor a project (Admin any; PM if a member)',
+    summary: 'Rename/re-describe/recolor a project (Admin any; PM if a member)',
   })
   @ApiOkResponse({ type: GetProjectResponseDto })
   @ApiBadRequestResponse({

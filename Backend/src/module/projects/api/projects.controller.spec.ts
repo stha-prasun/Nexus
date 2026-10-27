@@ -29,6 +29,7 @@ describe('ProjectsController', () => {
     id: 'proj-1',
     organizationId: 'org-1',
     name: 'Website relaunch',
+    description: null,
     color: '#1F2FE0',
     createdByUserId: 'actor-1',
     createdByName: 'Ada',

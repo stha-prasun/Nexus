@@ -25,6 +25,8 @@ export const projects = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: 'cascade' }),
     name: varchar('name', { length: 100 }).notNull(),
+    // Nullable so pre-description rows stay valid; the DTO bounds it at 500.
+    description: varchar('description', { length: 500 }),
     // varchar(7) matches the DTO's `#rrggbb` bound; the CHECK mirrors the
     // DTO's @Matches so a bad hex can never land through any path.
     color: varchar('color', { length: 7 })

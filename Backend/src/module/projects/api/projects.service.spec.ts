@@ -73,6 +73,7 @@ describe('ProjectsService', () => {
     id: 'proj-1',
     organizationId: org.id,
     name: 'Website relaunch',
+    description: null,
     color: '#1F2FE0',
     createdByUserId: admin.userId,
     createdByName: admin.name,
@@ -324,6 +325,37 @@ describe('ProjectsService', () => {
       );
     });
 
+    it('persists an optional description (omitted → null)', async () => {
+      repository.findActiveOrgMemberships.mockImplementation(
+        async (_orgId: string, userIds: string[]) =>
+          userIds.map((userId) =>
+            membershipFor({ userId } as SessionUser, 'Dev'),
+          ),
+      );
+
+      await service.create(
+        createDto({
+          memberUserIds: [dev.userId],
+          leadUserIds: [dev.userId],
+          description: 'Rebuild the marketing site',
+        }),
+        admin,
+      );
+      expect(repository.insertProjectWithMembers).toHaveBeenCalledWith(
+        expect.objectContaining({ description: 'Rebuild the marketing site' }),
+        expect.any(Array),
+      );
+
+      await service.create(
+        createDto({ memberUserIds: [dev.userId], leadUserIds: [dev.userId] }),
+        admin,
+      );
+      expect(repository.insertProjectWithMembers).toHaveBeenLastCalledWith(
+        expect.objectContaining({ description: null }),
+        expect.any(Array),
+      );
+    });
+
     it('403 lead_role_forbidden when the creator (non-Dev) is listed as a lead', async () => {
       repository.findActiveOrgMemberships.mockResolvedValue([
         membershipFor(admin),
@@ -482,7 +514,7 @@ describe('ProjectsService', () => {
 
   // ---------------------------------------------------------------- update
   describe('update', () => {
-    it('400 empty_update when neither name nor color is present', async () => {
+    it('400 empty_update when no known field is present', async () => {
       repository.findProjectById.mockResolvedValue(projectView());
 
       await expectStatus(
@@ -562,6 +594,28 @@ describe('ProjectsService', () => {
 
       expect(repository.update).toHaveBeenCalledWith('proj-1', {
         color: '#2FB67C',
+      });
+    });
+
+    it('description alone is a valid update; blank clears it to null', async () => {
+      repository.findProjectById.mockResolvedValue(projectView());
+
+      await service.update(
+        'proj-1',
+        { description: 'New blurb' } as UpdateProjectDto,
+        admin,
+      );
+      expect(repository.update).toHaveBeenCalledWith('proj-1', {
+        description: 'New blurb',
+      });
+
+      await service.update(
+        'proj-1',
+        { description: '   ' } as UpdateProjectDto,
+        admin,
+      );
+      expect(repository.update).toHaveBeenLastCalledWith('proj-1', {
+        description: null,
       });
     });
   });
