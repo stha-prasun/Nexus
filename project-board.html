@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Board · Nexus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Move to tailwind.config.ts when converting to React + TS
+    tailwind.config = {
+      theme: {
+        borderRadius: { none: '0', DEFAULT: '0', full: '9999px' },   // sharp by default
+        extend: {
+          fontFamily: {
+            display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            sans: ['Figtree', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            cobalt: { DEFAULT: '#1F2FE0', dark: '#1521B5' },
+            ink: { DEFAULT: '#14183A', soft: '#5A6080', line: '#CDD0E0' },
+            sun: { DEFAULT: '#FFD83D', dark: '#F2C70F' },
+            paper: '#F5F6FB',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    .view-in { animation: rise .35s cubic-bezier(.2,.7,.2,1); }
+    #toast { transition: opacity .25s, transform .25s; }
+    #board { scrollbar-width: thin; }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body class="bg-white font-sans text-ink antialiased">
+  <div class="flex min-h-screen">
+
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-30 hidden w-60 shrink-0 flex-col border-r border-ink bg-white lg:sticky lg:top-0 lg:flex lg:h-screen">
+      <a href="dashboard.html" class="flex h-14 items-center gap-2.5 border-b border-ink-line px-4" aria-label="Nexus">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 8.5v3.5M12 12l-5.5 4M12 12l5.5 4" stroke="#1F2FE0" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="12" cy="6" r="3.5" fill="#FFD83D" stroke="#1F2FE0" stroke-width="1.8"/>
+          <circle cx="5.5" cy="17.5" r="2.5" fill="#1F2FE0"/><circle cx="18.5" cy="17.5" r="2.5" fill="#1F2FE0"/>
+        </svg>
+        <span class="font-display text-xl font-bold tracking-tight">Nexus</span>
+      </a>
+      <div class="p-3"><div id="org-block" class="flex w-full items-center gap-2.5 border border-ink px-2.5 py-2 text-sm"></div></div>
+      <p class="px-4 pb-1.5 pt-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">Workspace</p>
+      <nav id="nav" class="space-y-px px-3 text-sm" aria-label="Main"></nav>
+      <div id="me" class="mt-auto flex items-center gap-2.5 border-t border-ink-line p-4"></div>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="flex h-14 items-center justify-between border-b border-ink-line px-4 sm:px-8">
+        <button type="button" id="menu-btn" class="border border-ink px-3 py-1.5 text-sm font-semibold lg:hidden" aria-expanded="false" aria-controls="sidebar">Menu</button>
+        <p id="crumb" class="min-w-0 truncate text-sm text-ink-soft"></p>
+        <span class="hidden text-sm text-ink-soft sm:block" id="today"></span>
+      </header>
+      <main id="view" class="w-full min-w-0 px-4 py-6 sm:px-8"></main>
+    </div>
+  </div>
+
+  <dialog id="dlg" class="w-[92%] max-w-lg border-2 border-ink p-0 shadow-[8px_8px_0_#14183A] backdrop:bg-ink/50">
+    <form id="dlg-form" class="max-h-[90vh] overflow-auto p-6" novalidate>
+      <h2 id="dlg-title" class="font-display text-xl font-bold tracking-tight"></h2>
+      <div id="dlg-body" class="mt-3 space-y-4 text-sm text-ink-soft"></div>
+      <p id="dlg-err" role="alert" class="mt-3 hidden border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-800"></p>
+      <div class="mt-5 flex justify-end gap-2">
+        <button type="button" id="dlg-cancel" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper">Cancel</button>
+        <button type="submit" id="dlg-ok" class="px-4 py-2 text-sm font-semibold text-white"></button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" class="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 translate-y-2 bg-ink px-4 py-2.5 text-sm font-medium text-white opacity-0"></div>
+
+  <script>
+    /* ---------- Demo data ----------
+       ?id=1|2|3 picks the project. ?as=email picks who is signed in:
+       maya@acme.com Admin, jonas@acme.com PM (leads projects 1 and 2), tomas@acme.com PM (leads 3),
+       dana@acme.com HR, priya@acme.com / lena@acme.com Dev. */
+    const ORG = { name: 'Acme Design' };
+    const ROLES = {
+      admin: { label: 'Admin', cls: 'bg-sun text-ink' },
+      pm:    { label: 'PM',    cls: 'bg-cobalt text-white' },
+      hr:    { label: 'HR',    cls: 'bg-emerald-600 text-white' },
+      dev:   { label: 'Dev',   cls: 'border border-ink text-ink' },
+    };
+    const members = [
+      { name: 'Maya Kim',    email: 'maya@acme.com',  role: 'admin' },
+      { name: 'Jonas Weber', email: 'jonas@acme.com', role: 'pm' },
+      { name: 'Tomás Reyes', email: 'tomas@acme.com', role: 'pm' },
+      { name: 'Dana Ortiz',  email: 'dana@acme.com',  role: 'hr' },
+      { name: 'Priya Patel', email: 'priya@acme.com', role: 'dev' },
+      { name: 'Lena Wu',     email: 'lena@acme.com',  role: 'dev' },
+    ];
+    const PROJECTS = [
+      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
+      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
+      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', lead: 'tomas@acme.com', members: ['tomas@acme.com', 'lena@acme.com'] },
+    ];
+    // [title, status, assignee, priority, due in N days from today]
+    const SEED = {
+      1: [
+        ['Finalize homepage copy', 'done', 'priya@acme.com', 'medium', -6], ['Export brand assets', 'done', 'lena@acme.com', 'low', -5],
+        ['Set up analytics', 'resolved', 'priya@acme.com', 'medium', -2], ['Update API docs', 'testing', 'lena@acme.com', 'high', 1],
+        ['Fix checkout timeout', 'review', 'priya@acme.com', 'urgent', 0], ['Write release notes', 'review', 'jonas@acme.com', 'low', 3],
+        ['Review mobile layout', 'progress', 'priya@acme.com', 'high', 1], ['Hero animation', 'progress', 'lena@acme.com', 'medium', 4],
+        ['Waiting on legal for cookie banner', 'hold', 'jonas@acme.com', 'medium', -1], ['Migrate blog posts', 'todo', null, 'medium', 7],
+        ['Audit accessibility', 'todo', 'lena@acme.com', 'high', 6], ['Set up staging redirects', 'todo', 'priya@acme.com', 'low', 9],
+      ],
+      2: [['Push notifications', 'progress', 'priya@acme.com', 'high', 2], ['Onboarding flow', 'review', 'priya@acme.com', 'medium', 1], ['App store listing', 'todo', 'jonas@acme.com', 'low', 12], ['Crash reporting', 'done', 'priya@acme.com', 'medium', -3]],
+      3: [['Logo shortlist', 'review', 'lena@acme.com', 'high', 0], ['Color palette', 'progress', 'tomas@acme.com', 'medium', 3], ['Type specimen', 'todo', 'lena@acme.com', 'low', 8]],
+    };
+    const STATUSES = [
+      { k: 'todo',     label: 'To do',       color: '#8A90AD' },
+      { k: 'progress', label: 'In progress', color: '#1F2FE0' },
+      { k: 'review',   label: 'In review',   color: '#FFD83D' },
+      { k: 'hold',     label: 'On hold',     color: '#E5484D' },
+      { k: 'testing',  label: 'Testing',     color: '#0EA5A5' },
+      { k: 'resolved', label: 'Resolved',    color: '#2FB67C' },
+      { k: 'done',     label: 'Done',        color: '#14183A' },
+    ];
+    const PRIORITIES = {
+      urgent: { label: 'Urgent', color: '#E5484D' }, high: { label: 'High', color: '#F59E0B' },
+      medium: { label: 'Medium', color: '#1F2FE0' }, low:  { label: 'Low',  color: '#8A90AD' },
+    };
+
+    const params = new URLSearchParams(location.search);
+    const VIEWER = members.some((m) => m.email === params.get('as')) ? params.get('as') : 'maya@acme.com';   // in the real app: the signed-in user
+    const project = PROJECTS.find((p) => p.id === +(params.get('id') || 1));
+    const link = (page) => `${page}?id=${project ? project.id : 1}` + (params.get('as') ? `&as=${encodeURIComponent(params.get('as'))}` : '');
+    const PREFIX = project ? project.name.split(/\s+/).map((w) => w[0]).join('').slice(0, 3).toUpperCase() : '';
+    const dayStr = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return x.toLocaleDateString('en-CA'); };
+    let tasks = project ? (SEED[project.id] || []).map(([title, status, assignee, priority, due], i) => ({
+      id: project.id * 1000 + i, key: `${PREFIX}-${i + 1}`, title, description: '', status, assignee, priority, due: dayStr(due),
+    })) : [];
+    const ui = { q: '', mine: false, collapsed: new Set(), drag: null };
+
+    /* ---------- Permissions ---------- */
+    const byEmail = (e) => members.find((m) => m.email === e);
+    const role = () => byEmail(VIEWER).role;
+    const full = () => role() === 'admin' || (role() === 'pm' && project.lead === VIEWER);   // create, edit, delete, assign, move any
+    const canMove = (t) => full() || t.assignee === VIEWER;                                 // devs move only their own tasks
+    const access = () => !project ? 'missing' : role() === 'hr' ? 'hr' : (role() === 'admin' || project.members.includes(VIEWER)) ? 'ok' : 'denied';
+
+    /* ---------- Helpers ---------- */
+    const $ = (s) => document.querySelector(s);
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const initials = (n) => n.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+    const TINTS = ['#DDE2FF', '#FFE79A', '#C9F0DE', '#FAD4D4', '#E0D8FA'];
+    const tint = (s) => TINTS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
+    const avatar = (name, size = 'h-9 w-9 text-xs', extra = '') => `<span class="flex ${size} shrink-0 items-center justify-center font-bold text-ink ${extra}" style="background:${tint(name)}">${esc(initials(name))}</span>`;
+    const badge = (r) => `<span class="inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[r].cls}">${ROLES[r].label}</span>`;
+    const statusLabel = (k) => STATUSES.find((s) => s.k === k).label;
+    const INPUT = 'w-full border border-ink/40 bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-soft/60 outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25 disabled:bg-paper disabled:text-ink-soft';
+    const BTN = 'bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark';
+    const LOCK = '<svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M6 11h12v9H6zM9 11V7a3 3 0 016 0v4"/></svg>';
+    const ICON = (d) => `<svg class="h-[18px] w-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true">${d}</svg>`;
+    const ICONS = {
+      org: ICON('<path d="M4 21V4h10v17M14 9h6v12M3 21h18M8 8h2M8 12h2M8 16h2"/>'),
+      projects: ICON('<path d="M3 5h7l2 2h9v13H3z"/>'),
+      tasks: ICON('<path d="M4 4h16v16H4zM8 12l3 3 5-6"/>'),
+    };
+
+    let toastTimer;
+    function toast(msg) {
+      const t = $('#toast'); t.textContent = msg;
+      t.classList.remove('opacity-0', 'translate-y-2');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.add('opacity-0', 'translate-y-2'), 2400);
+    }
+
+    function ask({ title, body, ok, danger = false, hideOk = false, validate = () => '', onOpen }) {
+      return new Promise((resolve) => {
+        const dlg = $('#dlg'), form = $('#dlg-form'), err = $('#dlg-err'), btn = $('#dlg-ok');
+        $('#dlg-title').textContent = title;
+        $('#dlg-body').innerHTML = body;
+        btn.textContent = ok;
+        btn.className = `px-4 py-2 text-sm font-semibold text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-cobalt hover:bg-cobalt-dark'} ${hideOk ? 'hidden' : ''}`;
+        $('#dlg-cancel').textContent = hideOk ? 'Close' : 'Cancel';
+        err.classList.add('hidden');
+        const done = (val) => { form.onsubmit = null; $('#dlg-cancel').onclick = null; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(val); };
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          const data = new FormData(form), msg = validate(data);
+          if (msg) { err.textContent = msg; err.classList.remove('hidden'); return; }
+          done(data);
+        };
+        $('#dlg-cancel').onclick = () => done(null);
+        dlg.onclose = () => done(null);
+        dlg.showModal();
+        if (onOpen) onOpen();
+        const first = $('#dlg-body input:not([disabled]), #dlg-body select:not([disabled])'); if (first) first.focus();
+      });
+    }
+
+    /* ---------- Chrome ---------- */
+    function renderChrome() {
+      const me = byEmail(VIEWER);
+      $('#org-block').innerHTML = `<span class="flex h-7 w-7 items-center justify-center bg-sun text-xs font-bold text-ink">${esc(initials(ORG.name))}</span><span class="min-w-0 flex-1 truncate font-semibold">${esc(ORG.name)}</span>`;
+      $('#nav').innerHTML =
+        `<a href="dashboard.html" class="flex items-center gap-3 px-3 py-2.5 text-ink-soft hover:bg-paper hover:text-ink">${ICONS.org}Organization</a>
+         <a href="projects.html" aria-current="page" class="flex items-center gap-3 bg-cobalt px-3 py-2.5 font-semibold text-white">${ICONS.projects}Projects</a>
+         <span class="flex items-center gap-3 px-3 py-2.5 text-ink-soft" title="Coming soon">${ICONS.tasks}My tasks<span class="ml-auto border border-ink-line px-1.5 text-[10px] font-bold uppercase tracking-wider">Soon</span></span>`;
+      $('#me').innerHTML = `${avatar(me.name)}<div class="min-w-0 text-sm"><p class="truncate font-semibold">${esc(me.name)}</p><p class="truncate text-xs text-ink-soft">${ROLES[me.role].label}</p></div>`;
+      $('#crumb').innerHTML = `<a href="projects.html" class="hover:text-ink">${esc(ORG.name)} / Projects</a> <span class="mx-1.5 text-ink-line">/</span> ${project ? `<a href="${link('project.html')}" class="hover:text-ink">${esc(project.name)}</a> <span class="mx-1.5 text-ink-line">/</span> <span class="font-semibold text-ink">Board</span>` : '<span class="font-semibold text-ink">Not found</span>'}`;
+      $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    /* ---------- Board ---------- */
+    function dueHtml(t) {
+      if (!t.due) return '<span></span>';
+      const n = Math.round((new Date(t.due + 'T00:00:00') - new Date(dayStr(0) + 'T00:00:00')) / 864e5);
+      const finished = t.status === 'done' || t.status === 'resolved';
+      const label = n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 0 ? `${-n}d overdue` : new Date(t.due + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const late = n < 0 && !finished;
+      return `<span class="inline-flex items-center gap-1.5 text-xs ${late ? 'font-bold text-red-600' : 'text-ink-soft'}">${late ? '<span class="h-2 w-2 bg-red-600"></span>' : ''}${label}</span>`;
+    }
+    const filtered = () => tasks.filter((t) => (!ui.mine || t.assignee === VIEWER) && (!ui.q || (t.title + ' ' + t.key).toLowerCase().includes(ui.q.toLowerCase())));
+
+    function cardHtml(t) {
+      const a = byEmail(t.assignee), pr = PRIORITIES[t.priority], m = canMove(t);
+      return `<article data-task="${t.id}" tabindex="0" ${m ? 'draggable="true"' : ''} aria-label="${esc(t.title)}, ${statusLabel(t.status)}"
+        class="${m ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} border border-ink-line bg-white p-3 outline-none transition-colors hover:border-ink focus-visible:border-cobalt focus-visible:ring-2 focus-visible:ring-cobalt/30">
+        <div class="flex items-center justify-between text-[11px] font-bold text-ink-soft"><span>${esc(t.key)}</span>
+          <span class="inline-flex items-center gap-1.5 uppercase tracking-wider"><span class="h-2 w-2" style="background:${pr.color}"></span>${pr.label}</span></div>
+        <p class="mt-1.5 text-sm font-semibold leading-snug">${esc(t.title)}</p>
+        <div class="mt-3 flex items-center justify-between">${dueHtml(t)}
+          ${a ? avatar(a.name, 'h-6 w-6 text-[9px]') : '<span class="flex h-6 w-6 items-center justify-center border border-dashed border-ink-soft/60 text-[10px] text-ink-soft" title="Unassigned">?</span>'}</div>
+      </article>`;
+    }
+
+    function boardHtml() {
+      const list = filtered();
+      return STATUSES.map((s) => {
+        const total = tasks.filter((t) => t.status === s.k).length;
+        if (ui.collapsed.has(s.k)) return `<div data-col="${s.k}" class="flex w-12 shrink-0 flex-col items-center border border-ink-line bg-paper">
+          <button type="button" data-action="toggle-col" data-s="${s.k}" aria-label="Expand ${s.label}" class="flex w-full flex-1 flex-col items-center gap-3 py-3 hover:bg-white">
+            <span class="h-2.5 w-2.5" style="background:${s.color}"></span><span class="bg-white px-1.5 text-xs font-bold text-ink-soft">${total}</span>
+            <span class="text-xs font-bold uppercase tracking-wider" style="writing-mode:vertical-rl">${s.label}</span></button></div>`;
+        const items = list.filter((t) => t.status === s.k);
+        return `<section data-col="${s.k}" class="flex w-[272px] shrink-0 flex-col" aria-label="${s.label}">
+          <header class="flex items-center gap-2 border-b-2 px-1 py-2" style="border-color:${s.color}">
+            <span class="h-2.5 w-2.5" style="background:${s.color}"></span><h2 class="text-xs font-bold uppercase tracking-wider">${s.label}</h2>
+            <span class="bg-paper px-1.5 text-xs font-bold text-ink-soft">${total}</span>
+            <button type="button" data-action="toggle-col" data-s="${s.k}" aria-label="Collapse ${s.label}" class="ml-auto px-1.5 text-ink-soft hover:text-ink">–</button></header>
+          <div class="col-body mt-2 min-h-[140px] flex-1 space-y-2 border border-transparent p-1" data-status="${s.k}">
+            ${items.map(cardHtml).join('') || '<p class="empty px-2 py-6 text-center text-xs text-ink-soft/70">No tasks</p>'}</div>
+          ${full() ? `<button type="button" data-action="new-task" data-s="${s.k}" class="mt-1 w-full border border-dashed border-ink-soft/40 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-solid hover:border-ink hover:bg-paper hover:text-ink">+ Add task</button>` : ''}
+        </section>`;
+      }).join('');
+    }
+    const renderBoard = () => { $('#board').innerHTML = boardHtml(); };
+
+    function renderStats() {
+      const n = tasks.length, done = tasks.filter((t) => t.status === 'done').length;
+      const segs = STATUSES.map((s) => ({ s, c: tasks.filter((t) => t.status === s.k).length })).filter((x) => x.c);
+      $('#stats').innerHTML = `<div class="mb-1.5 flex items-baseline justify-between text-sm">
+          <span class="text-xs font-bold uppercase tracking-wider text-ink-soft">Progress</span>
+          <span class="text-ink-soft"><strong class="text-ink">${done}</strong> of ${n} done</span></div>
+        <div class="flex h-2 w-full bg-paper" role="img" aria-label="${done} of ${n} tasks done">${segs.map(({ s, c }) => `<span title="${s.label}: ${c}" style="width:${(c / n) * 100}%;background:${s.color}"></span>`).join('')}</div>`;
+    }
+
+    function render() {
+      renderChrome();
+      const v = $('#view'), a = access();
+      document.title = project ? `${project.name} board · Nexus` : 'Board · Nexus';
+      if (a !== 'ok') {
+        const msg = { missing: ['Project not found', "This project doesn't exist, or it was deleted."], hr: ["Projects aren't part of the HR role", 'HR looks after the people in the organization. Project work is handled by PMs, Admins and Devs.'], denied: ["You're not on this project", 'Ask the project lead to add you, and it will show up in your Projects list.'] }[a];
+        v.innerHTML = `<div class="max-w-2xl border border-ink p-8 sm:p-10"><span class="flex h-12 w-12 items-center justify-center bg-paper text-ink-soft">${LOCK}</span>
+          <h1 class="mt-5 font-display text-3xl font-bold leading-tight tracking-tight">${msg[0]}</h1><p class="mt-3 max-w-md text-sm text-ink-soft">${msg[1]}</p>
+          <a href="${a === 'hr' ? 'dashboard.html' : 'projects.html'}" class="mt-6 inline-block ${BTN}">${a === 'hr' ? 'Go to Organization' : 'Back to Projects'}</a></div>`;
+        return;
+      }
+      const lead = byEmail(project.lead);
+      v.innerHTML = `
+        <div class="flex flex-wrap items-start justify-between gap-4 border border-ink p-5 pl-7 sm:p-6 sm:pl-8" style="box-shadow: inset 6px 0 0 ${project.color}">
+          <div class="min-w-0 max-w-2xl">
+            <a href="${link('project.html')}" class="text-sm text-ink-soft hover:text-ink">← Project overview</a>
+            <h1 class="mt-2 font-display text-3xl font-bold leading-none tracking-tight">${esc(project.name)}</h1>
+            ${project.description ? `<p class="mt-2 text-sm text-ink-soft">${esc(project.description)}</p>` : ''}
+            <div class="mt-4 space-y-4">
+              <button type="button" data-action="people" class="flex items-center gap-3" aria-label="View project members">
+                <span class="flex -space-x-px">${project.members.map(byEmail).slice(0, 5).map((m) => avatar(m.name, 'h-8 w-8 text-[10px]', 'ring-2 ring-white')).join('')}</span>
+                <span class="text-sm text-ink-soft underline-offset-2 hover:underline">${project.members.length} members · Lead: <strong class="text-ink">${esc(lead.name)}</strong></span></button>
+              <div id="stats" class="w-full max-w-sm"></div>
+            </div>
+          </div>
+          ${full() ? `<button type="button" data-action="new-task" data-s="todo" class="${BTN}">New task</button>` : ''}
+        </div>
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <input id="q" type="search" placeholder="Search tasks" value="${esc(ui.q)}" class="${INPUT} max-w-xs py-2" autocomplete="off" aria-label="Search tasks" />
+          <button type="button" data-action="mine" aria-pressed="${ui.mine}" class="border border-ink px-3.5 py-2 text-sm font-semibold ${ui.mine ? 'bg-ink text-white' : 'hover:bg-paper'}">Only mine</button>
+          <p class="ml-auto hidden text-xs text-ink-soft md:block">${full() ? 'Drag cards between columns, or focus one and use ← →.' : 'You can move tasks assigned to you. Drag them, or focus one and use ← →.'}</p>
+        </div>
+        <div id="board" class="mt-4 flex gap-3 overflow-x-auto pb-4"></div>`;
+      renderBoard(); renderStats();
+      v.classList.remove('view-in'); void v.offsetWidth; v.classList.add('view-in');
+    }
+
+    /* ---------- Moving tasks ---------- */
+    function moveTask(id, status, beforeId = null) {
+      const t = tasks.find((x) => x.id === id); if (!t) return;
+      const from = t.status;
+      tasks = tasks.filter((x) => x !== t); t.status = status;
+      const i = beforeId == null ? -1 : tasks.findIndex((x) => x.id === beforeId);
+      if (i < 0) tasks.push(t); else tasks.splice(i, 0, t);
+      renderBoard(); renderStats();
+      if (from !== status) toast(`${t.key} moved to ${statusLabel(status)}`);   // TODO: PATCH /tasks/:id { status, position }
+    }
+
+    const line = Object.assign(document.createElement('div'), { className: 'my-1 h-[3px] bg-cobalt' });
+    function clearDrag() {
+      line.remove();
+      document.querySelectorAll('.col-body').forEach((b) => b.classList.remove('bg-paper', 'border-cobalt'));
+    }
+    document.addEventListener('dragstart', (e) => {
+      const c = e.target.closest?.('#board [data-task]'); if (!c) return;
+      ui.drag = +c.dataset.task; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', c.dataset.task);
+      requestAnimationFrame(() => c.classList.add('opacity-40'));
+    });
+    document.addEventListener('dragover', (e) => {
+      if (ui.drag == null) return;
+      const col = e.target.closest?.('#board [data-col]'); if (!col) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      clearDrag();
+      const body = col.querySelector('.col-body'); if (!body) return;   // collapsed column: drops go to the end
+      body.classList.add('bg-paper', 'border-cobalt');
+      const cards = [...body.querySelectorAll('[data-task]')].filter((c) => +c.dataset.task !== ui.drag);
+      const ref = cards.find((c) => { const r = c.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+      body.querySelector('.empty')?.remove();
+      if (ref) body.insertBefore(line, ref); else body.appendChild(line);
+    });
+    document.addEventListener('drop', (e) => {
+      if (ui.drag == null) return;
+      const col = e.target.closest?.('#board [data-col]'); if (!col) return;
+      e.preventDefault();
+      const next = line.parentNode ? line.nextElementSibling : null;
+      const beforeId = next && next.dataset.task ? +next.dataset.task : null;
+      const id = ui.drag; ui.drag = null; clearDrag();
+      moveTask(id, col.dataset.col, beforeId);
+    });
+    document.addEventListener('dragend', () => { if (ui.drag != null) { ui.drag = null; clearDrag(); renderBoard(); } });
+
+    /* Keyboard: ← → moves the focused card one column, Enter opens it */
+    document.addEventListener('keydown', (e) => {
+      const c = e.target.closest?.('#board [data-task]'); if (!c || e.target !== c) return;
+      const t = tasks.find((x) => x.id === +c.dataset.task);
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); actions['open-task']({ id: t.id }); }
+      if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && canMove(t)) {
+        e.preventDefault();
+        const i = STATUSES.findIndex((s) => s.k === t.status) + (e.key === 'ArrowRight' ? 1 : -1);
+        if (i < 0 || i >= STATUSES.length) return;
+        ui.collapsed.delete(STATUSES[i].k);
+        moveTask(t.id, STATUSES[i].k);
+        $(`[data-task="${t.id}"]`)?.focus();
+      }
+    });
+
+    /* ---------- Task dialog ---------- */
+    async function taskDialog(t, defaultStatus = 'todo') {
+      const edit = !!t, f = full(), movable = edit ? canMove(t) : true, ro = edit && !f;
+      const opt = (items, val) => items.map(([v, l]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('');
+      const people = [['', 'Unassigned'], ...project.members.map((e) => [e, byEmail(e).name])];
+      const d = await ask({
+        title: edit ? `${t.key} · ${t.title}` : 'New task', ok: !edit ? 'Create task' : f ? 'Save changes' : 'Save status', hideOk: ro && !movable,
+        body: `<div><label for="t-title" class="mb-1.5 block font-semibold text-ink">Title</label><input id="t-title" name="title" value="${esc(t?.title || '')}" ${ro ? 'disabled' : ''} class="${INPUT}" autocomplete="off"></div>
+          <div><label for="t-desc" class="mb-1.5 block font-semibold text-ink">Description</label><textarea id="t-desc" name="description" rows="3" ${ro ? 'disabled' : ''} class="${INPUT}" placeholder="${ro ? 'No description' : 'What needs to be done?'}">${esc(t?.description || '')}</textarea></div>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <div><label for="t-status" class="mb-1.5 block font-semibold text-ink">Status</label><select id="t-status" name="status" ${movable ? '' : 'disabled'} class="${INPUT}">${opt(STATUSES.map((s) => [s.k, s.label]), t?.status || defaultStatus)}</select></div>
+            <div><label for="t-assignee" class="mb-1.5 block font-semibold text-ink">Assignee</label><select id="t-assignee" name="assignee" ${ro ? 'disabled' : ''} class="${INPUT}">${opt(people, t?.assignee || '')}</select></div>
+            <div><label for="t-priority" class="mb-1.5 block font-semibold text-ink">Priority</label><select id="t-priority" name="priority" ${ro ? 'disabled' : ''} class="${INPUT}">${opt(Object.entries(PRIORITIES).map(([k, p]) => [k, p.label]), t?.priority || 'medium')}</select></div>
+            <div><label for="t-due" class="mb-1.5 block font-semibold text-ink">Due date</label><input id="t-due" name="due" type="date" value="${t?.due || ''}" ${ro ? 'disabled' : ''} class="${INPUT}"></div>
+          </div>
+          ${ro && !movable ? '<p class="border-l-2 border-cobalt pl-3">Only the lead or an admin can edit this task. You can move tasks that are assigned to you.</p>' : ''}
+          ${edit && f ? '<button type="button" id="t-del" class="text-sm font-semibold text-red-700 underline-offset-2 hover:underline">Delete task</button>' : ''}`,
+        validate: (fd) => fd.get('delete') || ro || fd.get('title').trim().length >= 2 ? '' : 'Give the task a title.',
+        onOpen: () => $('#t-del')?.addEventListener('click', () => { $('#dlg-form').insertAdjacentHTML('beforeend', '<input type="hidden" name="delete" value="1">'); $('#dlg-form').requestSubmit(); }),
+      });
+      if (!d) return;
+      if (d.get('delete')) {
+        const c = await ask({ title: 'Delete this task?', ok: 'Delete task', danger: true, body: `<p>${esc(t.key)} will be removed from the board for everyone. This can't be undone.</p>` });
+        if (!c) return;
+        tasks = tasks.filter((x) => x !== t); renderBoard(); renderStats(); toast(`${t.key} deleted`);   // TODO: DELETE /tasks/:id
+        return;
+      }
+      const status = d.get('status');
+      if (!edit) {
+        const num = tasks.reduce((m, x) => Math.max(m, +x.key.split('-')[1]), 0) + 1;
+        tasks.push({ id: Date.now(), key: `${PREFIX}-${num}`, title: d.get('title').trim(), description: d.get('description').trim(), status, assignee: d.get('assignee') || null, priority: d.get('priority'), due: d.get('due') || null });
+        renderBoard(); renderStats(); toast('Task created');   // TODO: POST /tasks
+        return;
+      }
+      if (f) Object.assign(t, { title: d.get('title').trim(), description: d.get('description').trim(), assignee: d.get('assignee') || null, priority: d.get('priority'), due: d.get('due') || null });
+      if (status !== t.status) moveTask(t.id, status); else { renderBoard(); if (f) toast('Task updated'); }   // TODO: PATCH /tasks/:id
+    }
+
+    /* ---------- Actions ---------- */
+    const actions = {
+      'toggle-col'({ s }) { ui.collapsed.has(s) ? ui.collapsed.delete(s) : ui.collapsed.add(s); renderBoard(); },
+      'new-task'({ s }) { taskDialog(null, s); },
+      'open-task'({ id }) { taskDialog(tasks.find((t) => t.id === +id)); },
+      mine() { ui.mine = !ui.mine; render(); },
+      people() {
+        ask({ title: 'Project members', ok: 'Close', hideOk: true,
+          body: `<ul class="divide-y divide-ink-line border border-ink-line">${project.members.map(byEmail).map((m) => `<li class="flex items-center gap-3 px-3 py-2">${avatar(m.name, 'h-8 w-8 text-[10px]')}<span class="min-w-0 flex-1"><span class="block truncate font-semibold text-ink">${esc(m.name)}${m.email === project.lead ? ' <span class="bg-sun px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">Lead</span>' : ''}</span><span class="block truncate text-xs">${esc(m.email)}</span></span>${badge(m.role)}</li>`).join('')}</ul>
+                 ${full() ? '<a href="projects.html" class="inline-block text-sm font-semibold text-cobalt underline-offset-2 hover:underline">Manage members on the Projects page</a>' : ''}` });
+      },
+    };
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (el) return actions[el.dataset.action]?.(el.dataset);
+      const card = e.target.closest('#board [data-task]');
+      if (card) actions['open-task']({ id: card.dataset.task });
+    });
+    document.addEventListener('input', (e) => { if (e.target.id === 'q') { ui.q = e.target.value; renderBoard(); } });
+    $('#menu-btn').addEventListener('click', () => {
+      const open = $('#sidebar').classList.toggle('hidden') === false;
+      $('#sidebar').classList.toggle('flex', open);
+      $('#menu-btn').setAttribute('aria-expanded', String(open));
+    });
+
+    render();
+  </script>
+</body>
+</html>

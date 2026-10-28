@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project · Nexus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Move to tailwind.config.ts when converting to React + TS
+    tailwind.config = {
+      theme: {
+        borderRadius: { none: '0', DEFAULT: '0', full: '9999px' },   // sharp by default
+        extend: {
+          fontFamily: {
+            display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            sans: ['Figtree', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            cobalt: { DEFAULT: '#1F2FE0', dark: '#1521B5' },
+            ink: { DEFAULT: '#14183A', soft: '#5A6080', line: '#CDD0E0' },
+            sun: { DEFAULT: '#FFD83D', dark: '#F2C70F' },
+            paper: '#F5F6FB',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    .view-in { animation: rise .35s cubic-bezier(.2,.7,.2,1); }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body class="bg-white font-sans text-ink antialiased">
+  <div class="flex min-h-screen">
+
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-30 hidden w-60 shrink-0 flex-col border-r border-ink bg-white lg:sticky lg:top-0 lg:flex lg:h-screen">
+      <a href="dashboard.html" class="flex h-14 items-center gap-2.5 border-b border-ink-line px-4" aria-label="Nexus">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 8.5v3.5M12 12l-5.5 4M12 12l5.5 4" stroke="#1F2FE0" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="12" cy="6" r="3.5" fill="#FFD83D" stroke="#1F2FE0" stroke-width="1.8"/>
+          <circle cx="5.5" cy="17.5" r="2.5" fill="#1F2FE0"/><circle cx="18.5" cy="17.5" r="2.5" fill="#1F2FE0"/>
+        </svg>
+        <span class="font-display text-xl font-bold tracking-tight">Nexus</span>
+      </a>
+      <div class="p-3"><div id="org-block" class="flex w-full items-center gap-2.5 border border-ink px-2.5 py-2 text-sm"></div></div>
+      <p class="px-4 pb-1.5 pt-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">Workspace</p>
+      <nav id="nav" class="space-y-px px-3 text-sm" aria-label="Main"></nav>
+      <div id="me" class="mt-auto flex items-center gap-2.5 border-t border-ink-line p-4"></div>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="flex h-14 items-center justify-between border-b border-ink-line px-4 sm:px-8">
+        <button type="button" id="menu-btn" class="border border-ink px-3 py-1.5 text-sm font-semibold lg:hidden" aria-expanded="false" aria-controls="sidebar">Menu</button>
+        <p id="crumb" class="min-w-0 truncate text-sm text-ink-soft"></p>
+        <span class="hidden text-sm text-ink-soft sm:block" id="today"></span>
+      </header>
+      <main id="view" class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8"></main>
+    </div>
+  </div>
+
+  <dialog id="dlg" class="w-[92%] max-w-lg border-2 border-ink p-0 shadow-[8px_8px_0_#14183A] backdrop:bg-ink/50">
+    <form id="dlg-form" class="max-h-[90vh] overflow-auto p-6" novalidate>
+      <h2 id="dlg-title" class="font-display text-xl font-bold tracking-tight"></h2>
+      <div id="dlg-body" class="mt-3 space-y-4 text-sm text-ink-soft"></div>
+      <p id="dlg-err" role="alert" class="mt-3 hidden border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-800"></p>
+      <div class="mt-5 flex justify-end gap-2">
+        <button type="button" id="dlg-cancel" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper">Cancel</button>
+        <button type="submit" id="dlg-ok" class="px-4 py-2 text-sm font-semibold text-white"></button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" class="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 translate-y-2 bg-ink px-4 py-2.5 text-sm font-medium text-white opacity-0"></div>
+
+  <script>
+    /* ---------- Demo data ----------
+       ?id=1|2|3 picks the project. ?as=email picks who is signed in:
+       maya@acme.com Admin, jonas@acme.com PM (leads 1 and 2), tomas@acme.com PM (leads 3),
+       dana@acme.com HR, priya@acme.com / lena@acme.com Dev. */
+    const ORG = { name: 'Acme Design' };
+    const ROLES = {
+      admin: { label: 'Admin', cls: 'bg-sun text-ink' },
+      pm:    { label: 'PM',    cls: 'bg-cobalt text-white' },
+      hr:    { label: 'HR',    cls: 'bg-emerald-600 text-white' },
+      dev:   { label: 'Dev',   cls: 'border border-ink text-ink' },
+    };
+    const members = [
+      { name: 'Maya Kim',    email: 'maya@acme.com',  role: 'admin' },
+      { name: 'Jonas Weber', email: 'jonas@acme.com', role: 'pm' },
+      { name: 'Tomás Reyes', email: 'tomas@acme.com', role: 'pm' },
+      { name: 'Dana Ortiz',  email: 'dana@acme.com',  role: 'hr' },
+      { name: 'Priya Patel', email: 'priya@acme.com', role: 'dev' },
+      { name: 'Lena Wu',     email: 'lena@acme.com',  role: 'dev' },
+    ];
+    const PROJECTS = [
+      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
+      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
+      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', lead: 'tomas@acme.com', members: ['tomas@acme.com', 'lena@acme.com'] },
+    ];
+    // Task counts per status. In the real app these come from the API; the task list itself lives on the board page.
+    const COUNTS = {
+      1: { todo: 3, progress: 2, review: 2, hold: 1, testing: 1, resolved: 1, done: 2 },
+      2: { todo: 1, progress: 1, review: 1, hold: 0, testing: 0, resolved: 0, done: 1 },
+      3: { todo: 1, progress: 1, review: 1, hold: 0, testing: 0, resolved: 0, done: 0 },
+    };
+    const STATUSES = [
+      { k: 'todo', label: 'To do', color: '#8A90AD' }, { k: 'progress', label: 'In progress', color: '#1F2FE0' },
+      { k: 'review', label: 'In review', color: '#FFD83D' }, { k: 'hold', label: 'On hold', color: '#E5484D' },
+      { k: 'testing', label: 'Testing', color: '#0EA5A5' }, { k: 'resolved', label: 'Resolved', color: '#2FB67C' },
+      { k: 'done', label: 'Done', color: '#14183A' },
+    ];
+
+    const params = new URLSearchParams(location.search);
+    const VIEWER = members.some((m) => m.email === params.get('as')) ? params.get('as') : 'maya@acme.com';   // in the real app: the signed-in user
+    const project = PROJECTS.find((p) => p.id === +(params.get('id') || 1));
+    const link = (page) => `${page}?id=${project ? project.id : 1}` + (params.get('as') ? `&as=${encodeURIComponent(params.get('as'))}` : '');
+
+    /* ---------- Permissions (same rules as the board) ---------- */
+    const byEmail = (e) => members.find((m) => m.email === e);
+    const role = () => byEmail(VIEWER).role;
+    const full = () => role() === 'admin' || (role() === 'pm' && project.lead === VIEWER);
+    const access = () => !project ? 'missing' : role() === 'hr' ? 'hr' : (role() === 'admin' || project.members.includes(VIEWER)) ? 'ok' : 'denied';
+
+    /* ---------- Helpers ---------- */
+    const $ = (s) => document.querySelector(s);
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const initials = (n) => n.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+    const pad = (n) => String(n).padStart(2, '0');
+    const TINTS = ['#DDE2FF', '#FFE79A', '#C9F0DE', '#FAD4D4', '#E0D8FA'];
+    const tint = (s) => TINTS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
+    const avatar = (name, size = 'h-9 w-9 text-xs', extra = '') => `<span class="flex ${size} shrink-0 items-center justify-center font-bold text-ink ${extra}" style="background:${tint(name)}">${esc(initials(name))}</span>`;
+    const badge = (r) => `<span class="inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[r].cls}">${ROLES[r].label}</span>`;
+    const BTN = 'bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark';
+    const LOCK = '<svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M6 11h12v9H6zM9 11V7a3 3 0 016 0v4"/></svg>';
+    const ICON = (d) => `<svg class="h-[18px] w-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true">${d}</svg>`;
+    const ICONS = {
+      org: ICON('<path d="M4 21V4h10v17M14 9h6v12M3 21h18M8 8h2M8 12h2M8 16h2"/>'),
+      projects: ICON('<path d="M3 5h7l2 2h9v13H3z"/>'),
+      tasks: ICON('<path d="M4 4h16v16H4zM8 12l3 3 5-6"/>'),
+    };
+
+    const INPUT = 'w-full border border-ink/40 bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-soft/60 outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25';
+    const COLORS = ['#1F2FE0', '#FFD83D', '#E5484D', '#2FB67C', '#14183A'];
+
+    let toastTimer;
+    function toast(msg) {
+      const t = $('#toast'); t.textContent = msg;
+      t.classList.remove('opacity-0', 'translate-y-2');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.add('opacity-0', 'translate-y-2'), 2400);
+    }
+    function ask({ title, body, ok, danger = false, validate = () => '' }) {
+      return new Promise((resolve) => {
+        const dlg = $('#dlg'), form = $('#dlg-form'), err = $('#dlg-err'), btn = $('#dlg-ok');
+        $('#dlg-title').textContent = title;
+        $('#dlg-body').innerHTML = body;
+        btn.textContent = ok;
+        btn.className = `px-4 py-2 text-sm font-semibold text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-cobalt hover:bg-cobalt-dark'}`;
+        err.classList.add('hidden');
+        const done = (val) => { form.onsubmit = null; $('#dlg-cancel').onclick = null; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(val); };
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          const data = new FormData(form), msg = validate(data);
+          if (msg) { err.textContent = msg; err.classList.remove('hidden'); return; }
+          done(data);
+        };
+        $('#dlg-cancel').onclick = () => done(null);
+        dlg.onclose = () => done(null);
+        dlg.showModal();
+        const first = $('#dlg-body input'); if (first) first.focus();
+      });
+    }
+
+    /* ---------- Chrome ---------- */
+    function renderChrome() {
+      const me = byEmail(VIEWER);
+      $('#org-block').innerHTML = `<span class="flex h-7 w-7 items-center justify-center bg-sun text-xs font-bold text-ink">${esc(initials(ORG.name))}</span><span class="min-w-0 flex-1 truncate font-semibold">${esc(ORG.name)}</span>`;
+      $('#nav').innerHTML =
+        `<a href="dashboard.html" class="flex items-center gap-3 px-3 py-2.5 text-ink-soft hover:bg-paper hover:text-ink">${ICONS.org}Organization</a>
+         <a href="projects.html" aria-current="page" class="flex items-center gap-3 bg-cobalt px-3 py-2.5 font-semibold text-white">${ICONS.projects}Projects</a>
+         <span class="flex items-center gap-3 px-3 py-2.5 text-ink-soft" title="Coming soon">${ICONS.tasks}My tasks<span class="ml-auto border border-ink-line px-1.5 text-[10px] font-bold uppercase tracking-wider">Soon</span></span>`;
+      $('#me').innerHTML = `${avatar(me.name)}<div class="min-w-0 text-sm"><p class="truncate font-semibold">${esc(me.name)}</p><p class="truncate text-xs text-ink-soft">${ROLES[me.role].label}</p></div>`;
+      $('#crumb').innerHTML = `<a href="projects.html" class="hover:text-ink">${esc(ORG.name)} / Projects</a> <span class="mx-1.5 text-ink-line">/</span> <span class="font-semibold text-ink">${project ? esc(project.name) : 'Not found'}</span>`;
+      $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    /* ---------- Overview ---------- */
+    function overview() {
+      const lead = byEmail(project.lead);
+      const people = [project.lead, ...project.members.filter((e) => e !== project.lead)].map(byEmail);
+      const counts = COUNTS[project.id] || {}, total = STATUSES.reduce((n, s) => n + (counts[s.k] || 0), 0), done = counts.done || 0;
+      const access = role() === 'admin' ? 'Admin · oversight' : project.lead === VIEWER ? 'You lead this project' : 'Member';
+      const note = full()
+        ? (role() === 'admin' ? 'As an admin you can oversee every project, and create, edit, assign and move any task.' : 'As the project lead you can create, edit, assign and delete tasks, and move any task on the board.')
+        : 'You can see every task on the board, and move the ones assigned to you.';
+
+      const rows = people.map((m) => `
+        <li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px] ${m.email === VIEWER ? 'bg-paper' : ''}">
+          <div class="flex min-w-0 items-center gap-3">${avatar(m.name)}<span class="truncate font-semibold">${esc(m.name)}${m.email === VIEWER ? ' <span class="font-normal text-ink-soft">(you)</span>' : ''}</span></div>
+          <span class="order-3 col-span-2 truncate text-sm text-ink-soft sm:order-none sm:col-span-1">${esc(m.email)}</span>
+          <div>${badge(m.role)}</div>
+          <div class="hidden sm:block">${m.email === project.lead ? '<span class="inline-block bg-sun px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-ink">Lead</span>' : '<span class="text-sm text-ink-soft">Member</span>'}</div>
+        </li>`).join('');
+
+      const stat = (label, value) => `<div class="px-4 py-3 first:pl-0"><dt class="text-xs font-bold uppercase tracking-wider text-ink-soft">${label}</dt><dd class="mt-1 font-display text-xl font-bold leading-tight">${value}</dd></div>`;
+
+      return `
+      <div class="border border-ink">
+        <div class="grid md:grid-cols-[minmax(0,1fr)_14rem]">
+          <div class="p-6 sm:p-8" style="box-shadow: inset 6px 0 0 ${project.color}">
+            <div class="flex items-center justify-between gap-3 pl-2">
+              <a href="projects.html" class="text-sm text-ink-soft hover:text-ink">← All projects</a>
+              ${full() ? '<button type="button" data-action="edit" class="border border-ink px-3.5 py-1.5 text-sm font-semibold hover:bg-ink hover:text-white">Edit project</button>' : ''}
+            </div>
+            <h1 class="mt-3 pl-2 font-display text-4xl font-bold leading-none tracking-tight">${esc(project.name)}</h1>
+            ${project.description ? `<p class="mt-3 max-w-xl pl-2 text-ink-soft">${esc(project.description)}</p>` : ''}
+          </div>
+          <a href="${link('project-board.html')}" class="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0">Open board<span aria-hidden="true" class="text-2xl leading-none text-sun transition-transform group-hover:translate-x-1">→</span></a>
+        </div>
+        <dl class="grid grid-cols-2 divide-x divide-ink-line border-t border-ink-line px-4 sm:grid-cols-4 sm:px-8">
+          ${stat('Lead', esc(lead.name))}${stat('Members', project.members.length)}${stat('Tasks', total)}${stat('Your access', access)}
+        </dl>
+      </div>
+      <p class="mt-4 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">${note}</p>
+
+      <section class="mt-10" aria-labelledby="h-people">
+        <div class="mb-3 flex items-end justify-between gap-3">
+          <h2 id="h-people" class="font-display text-2xl font-bold tracking-tight">Members <span class="ml-1 align-middle font-sans text-sm font-bold text-ink-soft">${pad(people.length)}</span></h2>
+          ${full() ? '<a href="projects.html" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white">Manage members</a>' : ''}
+        </div>
+        <div class="border border-ink">
+          <div class="hidden grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px] gap-x-4 border-b border-ink bg-paper px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft sm:grid">
+            <span>Member</span><span>Email</span><span>Org role</span><span>In this project</span>
+          </div>
+          <ul>${rows}</ul>
+        </div>
+      </section>
+
+      <section class="mt-10" aria-labelledby="h-progress">
+        <div class="mb-3 flex items-end justify-between gap-3">
+          <h2 id="h-progress" class="font-display text-2xl font-bold tracking-tight">Progress</h2>
+          <span class="text-sm text-ink-soft"><strong class="text-ink">${done}</strong> of ${total} done</span>
+        </div>
+        ${total ? `<div class="flex h-3 w-full bg-paper" role="img" aria-label="${done} of ${total} tasks done">${STATUSES.filter((s) => counts[s.k]).map((s) => `<span title="${s.label}: ${counts[s.k]}" style="width:${(counts[s.k] / total) * 100}%;background:${s.color}"></span>`).join('')}</div>` : ''}
+        <ul class="mt-3 grid grid-cols-2 gap-px border border-ink-line bg-ink-line sm:grid-cols-4 lg:grid-cols-7">
+          ${STATUSES.map((s) => `<li class="bg-white p-3"><p class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft"><span class="h-2.5 w-2.5" style="background:${s.color}"></span>${s.label}</p><p class="mt-1.5 font-display text-2xl font-bold">${counts[s.k] || 0}</p></li>`).join('')}
+        </ul>
+        <a href="${link('project-board.html')}" class="mt-4 inline-block ${BTN}">Go to the task board →</a>
+      </section>
+
+      ${full() ? `
+      <section class="mt-12 border-2 border-red-600" aria-labelledby="h-danger">
+        <div class="flex items-center gap-2 bg-red-600 px-5 py-2 text-white">
+          <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M12 3L2 21h20L12 3zM12 10v5M12 18v.5"/></svg>
+          <h2 id="h-danger" class="text-xs font-bold uppercase tracking-wider">Danger zone · Sensitive area</h2>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-4 p-5">
+          <div class="max-w-xl">
+            <p class="font-semibold">Delete this project</p>
+            <p class="mt-1 text-sm text-ink-soft">This permanently deletes <strong class="text-ink">${esc(project.name)}</strong> and all of its tasks. Members lose access to it. <strong class="text-red-700">This cannot be undone.</strong></p>
+          </div>
+          <button type="button" data-action="delete" class="border border-red-600 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-600 hover:text-white">Delete project</button>
+        </div>
+      </section>` : ''}`;
+    }
+
+    function render() {
+      renderChrome();
+      const v = $('#view'), a = access();
+      document.title = project ? `${project.name} · Nexus` : 'Project · Nexus';
+      if (a !== 'ok') {
+        const msg = { missing: ['Project not found', "This project doesn't exist, or it was deleted."], hr: ["Projects aren't part of the HR role", 'HR looks after the people in the organization. Project work is handled by PMs, Admins and Devs.'], denied: ["You're not on this project", 'Ask the project lead to add you, and it will show up in your Projects list.'] }[a];
+        v.innerHTML = `<div class="max-w-2xl border border-ink p-8 sm:p-10"><span class="flex h-12 w-12 items-center justify-center bg-paper text-ink-soft">${LOCK}</span>
+          <h1 class="mt-5 font-display text-3xl font-bold leading-tight tracking-tight">${msg[0]}</h1><p class="mt-3 max-w-md text-sm text-ink-soft">${msg[1]}</p>
+          <a href="${a === 'hr' ? 'dashboard.html' : 'projects.html'}" class="mt-6 inline-block ${BTN}">${a === 'hr' ? 'Go to Organization' : 'Back to Projects'}</a></div>`;
+        return;
+      }
+      v.innerHTML = overview();
+      v.classList.remove('view-in'); void v.offsetWidth; v.classList.add('view-in');
+    }
+
+    const actions = {
+      async edit() {
+        const d = await ask({
+          title: 'Edit project', ok: 'Save changes',
+          body: `<div><label for="p-name" class="mb-1.5 block font-semibold text-ink">Project name</label><input id="p-name" name="name" value="${esc(project.name)}" class="${INPUT}" autocomplete="off"></div>
+                 <div><label for="p-desc" class="mb-1.5 block font-semibold text-ink">Description <span class="font-normal text-ink-soft">optional</span></label><textarea id="p-desc" name="description" rows="3" class="${INPUT}">${esc(project.description || '')}</textarea></div>
+                 <fieldset><legend class="mb-1.5 font-semibold text-ink">Color</legend><div class="flex gap-3">${COLORS.map((c) => `<label class="cursor-pointer"><input type="radio" name="color" value="${c}" ${c === project.color ? 'checked' : ''} class="peer sr-only"><span class="block h-7 w-7 ring-ink ring-offset-2 peer-checked:ring-2 peer-focus-visible:ring-2" style="background:${c}"></span></label>`).join('')}</div></fieldset>`,
+          validate: (f) => {
+            const name = f.get('name').trim();
+            if (name.length < 2) return 'Give the project a name.';
+            if (PROJECTS.some((p) => p.id !== project.id && p.name.toLowerCase() === name.toLowerCase())) return 'Another project already has that name.';
+            return '';
+          },
+        });
+        if (!d) return;
+        Object.assign(project, { name: d.get('name').trim(), description: d.get('description').trim(), color: d.get('color') });   // TODO: PATCH /projects/:id
+        render(); toast('Project updated');
+      },
+      async delete() {
+        const name = project.name;
+        const d = await ask({
+          title: 'Delete project', ok: 'Delete forever', danger: true,
+          body: `<p class="border-l-4 border-red-600 bg-red-50 px-3 py-2 font-semibold text-red-800">Sensitive action. There is no way to recover a deleted project.</p>
+                 <p>This permanently deletes <strong class="text-ink">${esc(name)}</strong> and every task on its board.</p>
+                 <div><label for="d-confirm" class="mb-1.5 block font-semibold text-ink">Type the project name to confirm</label><input id="d-confirm" name="confirm" autocomplete="off" placeholder="${esc(name)}" class="${INPUT}"></div>`,
+          validate: (f) => f.get('confirm').trim() === name ? '' : "The name doesn't match.",
+        });
+        if (!d) return;
+        // TODO: DELETE /projects/:id, then go back to the list
+        location.href = 'projects.html' + (params.get('as') ? `?as=${encodeURIComponent(params.get('as'))}` : '');
+      },
+    };
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (el) actions[el.dataset.action]?.();
+    });
+
+    $('#menu-btn').addEventListener('click', () => {
+      const open = $('#sidebar').classList.toggle('hidden') === false;
+      $('#sidebar').classList.toggle('flex', open);
+      $('#menu-btn').setAttribute('aria-expanded', String(open));
+    });
+
+    render();
+  </script>
+</body>
+</html>
