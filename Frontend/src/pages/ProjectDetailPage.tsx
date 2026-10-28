@@ -1,8 +1,8 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router';
-import { AddProjectMemberDialog } from '@/components/dashboard/AddProjectMemberDialog';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
+import { ManageMembersDialog } from '@/components/dashboard/ManageMembersDialog';
 import { ProjectMemberTable } from '@/components/dashboard/ProjectMemberTable';
 import { useToast } from '@/components/dashboard/Toast';
 import {
@@ -11,20 +11,9 @@ import {
   getProject,
   logout,
   type Project,
-  type ProjectMember,
-  removeProjectMember,
-  setProjectLead,
   updateProject,
 } from '@/lib/api';
-import {
-  CURRENT_USER,
-  INPUT,
-  initials,
-  pad2,
-  ROLES,
-  tint,
-  toRoleKey,
-} from '@/lib/dashboard';
+import { CURRENT_USER, INPUT, pad2, ROLES, toRoleKey } from '@/lib/dashboard';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
 import { clearMembers } from '@/store/slices/membersSlice';
@@ -54,15 +43,50 @@ function Field({
   );
 }
 
-/** Fixed palette — same values as NewProjectDialog, all server-valid hex. */
-const COLORS = [
-  '#1F2FE0',
-  '#2FB67C',
-  '#E8590C',
-  '#7C3AED',
-  '#DB2777',
-  '#0E7490',
+/** Fixed palette — same swatches as the design's edit dialog, all server-valid hex. */
+const COLORS = ['#1F2FE0', '#FFD83D', '#E5484D', '#2FB67C', '#14183A'];
+
+/**
+ * Placeholder task counts — there is no tasks API yet, so every project
+ * renders the same demo numbers (design: project.html Progress section).
+ */
+const COUNTS: Record<string, number> = {
+  todo: 3,
+  progress: 2,
+  review: 2,
+  hold: 1,
+  testing: 1,
+  resolved: 1,
+  done: 2,
+};
+
+const STATUSES = [
+  { k: 'todo', label: 'To do', color: '#8A90AD' },
+  { k: 'progress', label: 'In progress', color: '#1F2FE0' },
+  { k: 'review', label: 'In review', color: '#FFD83D' },
+  { k: 'hold', label: 'On hold', color: '#E5484D' },
+  { k: 'testing', label: 'Testing', color: '#0EA5A5' },
+  { k: 'resolved', label: 'Resolved', color: '#2FB67C' },
+  { k: 'done', label: 'Done', color: '#14183A' },
 ];
+
+const TASK_TOTAL = STATUSES.reduce((n, s) => n + (COUNTS[s.k] ?? 0), 0);
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 px-4 py-3 first:pl-0">
+      <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+        {label}
+      </dt>
+      <dd
+        className="mt-1 truncate font-display text-xl font-bold leading-tight"
+        title={value}
+      >
+        {value}
+      </dd>
+    </div>
+  );
+}
 
 /** Controlled body for the rename/re-describe/recolor dialog. */
 function EditProjectFields({
@@ -76,18 +100,21 @@ function EditProjectFields({
 }) {
   const [name, setName] = useState(initialName);
   const [description, setDescription] = useState(initialDescription ?? '');
-  const [color, setColor] = useState(
-    COLORS.includes(initialColor) ? initialColor : COLORS[0],
-  );
+  const [color, setColor] = useState(initialColor);
+  /** The project's own colour always gets a swatch, even if it predates the palette. */
+  const swatches = COLORS.includes(initialColor)
+    ? COLORS
+    : [initialColor, ...COLORS];
 
   return (
     <>
-      <Field htmlFor="ep-name" label="Name">
+      <Field htmlFor="ep-name" label="Project name">
         <input
           id="ep-name"
           name="name"
           value={name}
           maxLength={100}
+          autoComplete="off"
           onChange={(event) => setName(event.target.value)}
           className={INPUT}
         />
@@ -108,7 +135,7 @@ function EditProjectFields({
         <span className="mb-1.5 block font-semibold text-ink">Color</span>
         <fieldset className="flex flex-wrap gap-2 border-0 p-0">
           <legend className="sr-only">Project color</legend>
-          {COLORS.map((swatch) => (
+          {swatches.map((swatch) => (
             <span key={swatch} className="relative inline-flex">
               <input
                 type="radio"
@@ -138,17 +165,6 @@ function EditProjectFields({
   );
 }
 
-function Avatar({ name, extra = '' }: { name: string; extra?: string }) {
-  return (
-    <span
-      className={`flex h-9 w-9 shrink-0 items-center justify-center text-xs font-bold text-ink ${extra}`}
-      style={{ background: tint(name) }}
-    >
-      {initials(name)}
-    </span>
-  );
-}
-
 export function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -156,6 +172,7 @@ export function ProjectDetailPage() {
   const { show, element: toastElement } = useToast();
   const { ask, element: dialogElement } = useDialog();
   const authUser = useAppSelector((session) => session.auth.user);
+  const knownProjects = useAppSelector((state) => state.projects.projects);
   const { org } = useOrganization();
 
   const [project, setProject] = useState<Project | null>(null);
@@ -163,7 +180,7 @@ export function ProjectDetailPage() {
     'loading' | 'ready' | 'error' | 'notfound'
   >('loading');
   const [error, setError] = useState<string[]>([]);
-  const [addOpen, setAddOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
 
   /** The server's project is the source of truth — synced to the list too. */
   const adopt = useCallback(
@@ -244,6 +261,14 @@ export function ProjectDetailPage() {
       validate: (data) => {
         const name = String(data.get('name') ?? '').trim();
         if (name.length < 2) return 'Give your project a name.';
+        // The list is only populated once it has been fetched — an empty
+        // store simply skips the check rather than blocking the rename.
+        const taken = knownProjects.some(
+          (other) =>
+            other.id !== project.id &&
+            other.name.toLowerCase() === name.toLowerCase(),
+        );
+        if (taken) return 'Another project already has that name.';
         return '';
       },
     });
@@ -323,61 +348,6 @@ export function ProjectDetailPage() {
     }
   };
 
-  const handleRemoveMember = async (member: ProjectMember): Promise<void> => {
-    if (!project) return;
-    const result = await ask({
-      title: `Remove ${member.name}?`,
-      ok: 'Remove',
-      danger: true,
-      body: (
-        <p>
-          {member.name} will lose access to{' '}
-          <strong className="text-ink">{project.name}</strong>.
-        </p>
-      ),
-    });
-    if (!result) return;
-    try {
-      const { project: updated } = await removeProjectMember(
-        project.id,
-        member.userId,
-      );
-      adopt(updated);
-      show(`${member.name} removed`);
-    } catch (err) {
-      show(
-        err instanceof ApiError
-          ? err.messages.join(' ')
-          : 'Something went wrong. Please try again.',
-      );
-    }
-  };
-
-  const handleToggleLead = (member: ProjectMember, isLead: boolean): void => {
-    if (!project) return;
-    void (async () => {
-      try {
-        const { project: updated } = await setProjectLead(
-          project.id,
-          member.userId,
-          isLead,
-        );
-        adopt(updated);
-        show(
-          isLead
-            ? `${member.name} is now a team lead`
-            : `${member.name} is no longer a team lead`,
-        );
-      } catch (err) {
-        show(
-          err instanceof ApiError
-            ? err.messages.join(' ')
-            : 'Something went wrong. Please try again.',
-        );
-      }
-    })();
-  };
-
   const crumb = (
     <>
       {org ? (
@@ -444,66 +414,88 @@ export function ProjectDetailPage() {
       </div>
     );
   } else {
+    const leads = members.filter((member) => member.isLead);
+    const leadLabel = leads.length
+      ? leads.map((member) => member.name).join(', ')
+      : project.createdByName;
+    const isLead = members.some(
+      (member) => member.userId === currentUserId && member.isLead,
+    );
+    const accessLabel =
+      actorRole === 'Admin'
+        ? 'Admin · oversight'
+        : isLead
+          ? 'You lead this project'
+          : 'Member';
+    const note =
+      actorRole === 'Admin'
+        ? 'As an admin you can oversee every project, and create, edit, assign and move any task.'
+        : actorRole === 'PM'
+          ? 'As the project lead you can create, edit, assign and delete tasks, and move any task on the board.'
+          : 'You can see every task on the board, and move the ones assigned to you.';
+    const done = COUNTS.done ?? 0;
+
     body = (
       <>
-        <section
-          aria-labelledby="p-title"
-          className="border border-ink p-6 sm:p-8"
-          style={{ boxShadow: `inset 6px 0 0 ${project.color}` }}
-        >
-          <p className="pl-2 text-xs font-bold uppercase tracking-wider text-ink-soft">
-            Project
-          </p>
-          <h1
-            id="p-title"
-            className="mt-3 pl-2 font-display text-3xl font-bold leading-none tracking-tight"
-          >
-            {project.name}
-          </h1>
-          {project.description ? (
-            <p className="mt-3 max-w-xl pl-2 text-[15px] leading-relaxed text-ink-soft">
-              {project.description}
-            </p>
-          ) : null}
-          <div className="mt-6 flex flex-wrap items-center gap-4 pl-2">
-            <div className="flex -space-x-px">
-              {members.slice(0, 6).map((member) => (
-                <Avatar
-                  key={member.userId}
-                  name={member.name}
-                  extra="ring-2 ring-white"
-                />
-              ))}
+        <div className="border border-ink">
+          <div className="grid md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div
+              className="p-6 sm:p-8"
+              style={{ boxShadow: `inset 6px 0 0 ${project.color}` }}
+            >
+              <div className="flex items-center justify-between gap-3 pl-2">
+                <Link
+                  to="/dashboard/projects"
+                  className="text-sm text-ink-soft hover:text-ink"
+                >
+                  ← All projects
+                </Link>
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleEdit()}
+                    className="border border-ink px-3.5 py-1.5 text-sm font-semibold hover:bg-ink hover:text-white"
+                  >
+                    Edit project
+                  </button>
+                ) : null}
+              </div>
+              <h1 className="mt-3 pl-2 font-display text-4xl font-bold leading-none tracking-tight">
+                {project.name}
+              </h1>
+              {project.description ? (
+                <p className="mt-3 max-w-xl pl-2 text-ink-soft">
+                  {project.description}
+                </p>
+              ) : null}
             </div>
-            <span className="text-sm text-ink-soft">
-              {members.length} members
-            </span>
-            <span className="text-sm text-ink-soft">
-              Created by {project.createdByName}
-            </span>
+            {/* Board route lands later — wired up when it exists. */}
+            <button
+              type="button"
+              className="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 text-left font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0"
+            >
+              Open board
+              <span
+                aria-hidden="true"
+                className="text-2xl leading-none text-sun transition-transform group-hover:translate-x-1"
+              >
+                →
+              </span>
+            </button>
           </div>
-          {canManage ? (
-            <div className="mt-5 flex flex-wrap gap-2 pl-2">
-              <button
-                type="button"
-                onClick={() => void handleEdit()}
-                className="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper"
-              >
-                Edit project
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddOpen(true)}
-                className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
-              >
-                Add member
-              </button>
-            </div>
-          ) : null}
-        </section>
+          <dl className="grid grid-cols-2 divide-x divide-ink-line border-t border-ink-line px-4 sm:grid-cols-4 sm:px-8">
+            <Stat label="Lead" value={leadLabel} />
+            <Stat label="Members" value={String(members.length)} />
+            <Stat label="Tasks" value={String(TASK_TOTAL)} />
+            <Stat label="Your access" value={accessLabel} />
+          </dl>
+        </div>
+        <p className="mt-4 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
+          {note}
+        </p>
 
         <section className="mt-10" aria-labelledby="p-members">
-          <div className="mb-3 flex items-end justify-between">
+          <div className="mb-3 flex items-end justify-between gap-3">
             <h2
               id="p-members"
               className="font-display text-2xl font-bold tracking-tight"
@@ -513,14 +505,69 @@ export function ProjectDetailPage() {
                 {pad2(members.length)}
               </span>
             </h2>
+            {canManage ? (
+              <button
+                type="button"
+                onClick={() => setManageOpen(true)}
+                className="border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white"
+              >
+                Manage members
+              </button>
+            ) : null}
           </div>
-          <ProjectMemberTable
-            project={project}
-            actorRole={actorRole ?? null}
-            currentUserId={currentUserId}
-            onRemove={(member) => void handleRemoveMember(member)}
-            onToggleLead={handleToggleLead}
-          />
+          <ProjectMemberTable project={project} currentUserId={currentUserId} />
+        </section>
+
+        <section className="mt-10" aria-labelledby="p-progress">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <h2
+              id="p-progress"
+              className="font-display text-2xl font-bold tracking-tight"
+            >
+              Progress
+            </h2>
+            <span className="text-sm text-ink-soft">
+              <strong className="text-ink">{done}</strong> of {TASK_TOTAL} done
+            </span>
+          </div>
+          <div
+            className="flex h-3 w-full bg-paper"
+            role="img"
+            aria-label={`${done} of ${TASK_TOTAL} tasks done`}
+          >
+            {STATUSES.filter((status) => COUNTS[status.k]).map((status) => (
+              <span
+                key={status.k}
+                title={`${status.label}: ${COUNTS[status.k]}`}
+                style={{
+                  width: `${((COUNTS[status.k] ?? 0) / TASK_TOTAL) * 100}%`,
+                  background: status.color,
+                }}
+              />
+            ))}
+          </div>
+          <ul className="mt-3 grid grid-cols-2 gap-px border border-ink-line bg-ink-line sm:grid-cols-4 lg:grid-cols-7">
+            {STATUSES.map((status) => (
+              <li key={status.k} className="bg-white p-3">
+                <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">
+                  <span
+                    className="h-2.5 w-2.5"
+                    style={{ background: status.color }}
+                  />
+                  {status.label}
+                </p>
+                <p className="mt-1.5 font-display text-2xl font-bold">
+                  {COUNTS[status.k] ?? 0}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="mt-4 inline-flex items-center gap-2 bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+          >
+            Go to the task board →
+          </button>
         </section>
 
         {canManage ? (
@@ -529,6 +576,17 @@ export function ProjectDetailPage() {
             aria-labelledby="p-danger"
           >
             <div className="flex items-center gap-2 bg-red-600 px-5 py-2 text-white">
+              <svg
+                className="h-4 w-4 shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="square"
+                aria-hidden="true"
+              >
+                <path d="M12 3L2 21h20L12 3zM12 10v5M12 18v.5" />
+              </svg>
               <h2
                 id="p-danger"
                 className="text-xs font-bold uppercase tracking-wider"
@@ -541,8 +599,8 @@ export function ProjectDetailPage() {
                 <p className="font-semibold">Delete this project</p>
                 <p className="mt-1 text-sm text-ink-soft">
                   This permanently deletes{' '}
-                  <strong className="text-ink">{project.name}</strong> and
-                  removes every member from it. Members lose access immediately.{' '}
+                  <strong className="text-ink">{project.name}</strong> and every
+                  membership on it. Members lose access immediately.{' '}
                   <strong className="text-red-700">
                     This cannot be undone.
                   </strong>
@@ -576,15 +634,15 @@ export function ProjectDetailPage() {
       onLogout={handleLogout}
     >
       <div className="view-in">{body}</div>
-      {project ? (
-        <AddProjectMemberDialog
-          open={addOpen}
+      {project && manageOpen ? (
+        <ManageMembersDialog
+          open
           project={project}
-          onClose={() => setAddOpen(false)}
-          onAdded={(updated) => {
-            setAddOpen(false);
+          onClose={() => setManageOpen(false)}
+          onSaved={(updated) => {
+            setManageOpen(false);
             adopt(updated);
-            show('Member added');
+            show('Members updated');
           }}
         />
       ) : null}
