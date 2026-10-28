@@ -184,8 +184,14 @@ function DashboardSkeleton({ label }: { label: string }) {
         </div>
         <div className="border border-ink">
           <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_120px_100px_72px]">
-            {['w-16', 'w-14', 'w-14', 'w-16', 'w-8'].map((width) => (
-              <Skeleton key={width} className={`h-3 ${width}`} />
+            {[
+              { key: 'member', width: 'w-16' },
+              { key: 'email', width: 'w-14' },
+              { key: 'role', width: 'w-14' },
+              { key: 'status', width: 'w-16' },
+              { key: 'actions', width: 'w-8' },
+            ].map((header) => (
+              <Skeleton key={header.key} className={`h-3 ${header.width}`} />
             ))}
           </div>
           <ul>{[0, 1, 2, 3].map(memberRow)}</ul>

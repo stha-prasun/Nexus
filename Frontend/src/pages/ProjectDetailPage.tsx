@@ -409,8 +409,14 @@ export function ProjectDetailPage() {
           </div>
           <div className="border border-ink">
             <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]">
-              {['w-16', 'w-14', 'w-16', 'w-24', 'w-14'].map((width) => (
-                <Skeleton key={width} className={`h-3 ${width}`} />
+              {[
+                { key: 'member', width: 'w-16' },
+                { key: 'email', width: 'w-14' },
+                { key: 'org-role', width: 'w-16' },
+                { key: 'in-this-project', width: 'w-24' },
+                { key: 'added', width: 'w-14' },
+              ].map((header) => (
+                <Skeleton key={header.key} className={`h-3 ${header.width}`} />
               ))}
             </div>
             <ul>
