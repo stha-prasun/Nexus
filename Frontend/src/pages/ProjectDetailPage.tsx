@@ -4,6 +4,7 @@ import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { ManageMembersDialog } from '@/components/dashboard/ManageMembersDialog';
 import { ProjectMemberTable } from '@/components/dashboard/ProjectMemberTable';
+import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import {
   ApiError,
@@ -370,13 +371,75 @@ export function ProjectDetailPage() {
 
   let body: ReactNode;
   if (status === 'loading') {
+    const row = [0, 1, 2, 3];
     body = (
-      <div
-        role="status"
-        aria-label="Loading project"
-        className="flex justify-center py-24"
-      >
-        <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
+      <div role="status" aria-label="Loading project" className="space-y-10">
+        <div className="border border-ink">
+          <div className="grid md:grid-cols-[minmax(0,1fr)_14rem]">
+            <div className="p-6 sm:p-8">
+              <div className="flex items-center justify-between gap-3 pl-2">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-8 w-28" />
+              </div>
+              <Skeleton className="mt-5 ml-2 h-9 w-2/3 max-w-md" />
+              <Skeleton className="mt-4 ml-2 h-4 w-full max-w-xl" />
+              <Skeleton className="mt-2 ml-2 h-4 w-4/5 max-w-lg" />
+            </div>
+            <div className="flex items-center justify-between gap-6 border-t border-ink bg-paper px-6 py-5 md:border-l md:border-t-0">
+              <Skeleton className="h-5 w-24" />
+              <Skeleton className="h-6 w-6" />
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 divide-x divide-ink-line border-t border-ink-line px-4 sm:grid-cols-4 sm:px-8">
+            {row.map((cell) => (
+              <div key={cell} className="px-4 py-3 first:pl-0">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="mt-2 h-5 w-24" />
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <Skeleton className="h-4 w-3/4 max-w-2xl" />
+
+        <section>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <Skeleton className="h-7 w-32" />
+            <Skeleton className="h-9 w-40" />
+          </div>
+          <div className="border border-ink">
+            <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]">
+              {['w-16', 'w-14', 'w-16', 'w-24', 'w-14'].map((width) => (
+                <Skeleton key={width} className={`h-3 ${width}`} />
+              ))}
+            </div>
+            <ul>
+              {[0, 1, 2, 3].map((member) => (
+                <li
+                  key={member}
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Skeleton className="h-9 w-9 shrink-0" />
+                    <Skeleton className="h-4 w-32" />
+                  </div>
+                  <div className="order-3 col-span-2 sm:order-none sm:col-span-1">
+                    <Skeleton className="h-3.5 w-40" />
+                  </div>
+                  <div className="hidden sm:block">
+                    <Skeleton className="h-5 w-16" />
+                  </div>
+                  <div className="hidden sm:block">
+                    <Skeleton className="h-4 w-14" />
+                  </div>
+                  <div className="hidden sm:block">
+                    <Skeleton className="h-3.5 w-20" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
       </div>
     );
   } else if (status === 'notfound') {

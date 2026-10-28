@@ -4,6 +4,7 @@ import { AppShell } from '@/components/dashboard/AppShell';
 import { ManageMembersDialog } from '@/components/dashboard/ManageMembersDialog';
 import { NewProjectDialog } from '@/components/dashboard/NewProjectDialog';
 import { Avatar } from '@/components/dashboard/OrgView';
+import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import { logout, type Project, type ProjectMember } from '@/lib/api';
 import {
@@ -105,6 +106,52 @@ function EmptyKanban() {
           {card('w-3/4')}
         </>,
       )}
+    </div>
+  );
+}
+
+/** Layout-matching placeholder for the list while org/projects load. */
+function ProjectsSkeleton({ label }: { label: string }) {
+  const card = (index: number) => (
+    <li
+      key={index}
+      className="bg-white p-5"
+      style={{ boxShadow: 'inset 0 4px 0 #CDD0E0' }}
+    >
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-3 w-6" />
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <Skeleton className="mt-6 h-5 w-3/4" />
+      <Skeleton className="mt-3 h-3.5 w-full" />
+      <Skeleton className="mt-2 h-3.5 w-2/3" />
+      <Skeleton className="mt-4 h-3 w-1/2" />
+      <div className="mt-5 flex items-center justify-between">
+        <div className="flex -space-x-px">
+          <Skeleton className="h-7 w-7" />
+          <Skeleton className="h-7 w-7" />
+          <Skeleton className="h-7 w-7" />
+        </div>
+        <Skeleton className="h-3.5 w-20" />
+      </div>
+    </li>
+  );
+  return (
+    <div role="status" aria-label={label} className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Skeleton className="h-9 w-48" />
+          <Skeleton className="mt-3 h-4 w-72 max-w-full" />
+        </div>
+        <Skeleton className="h-10 w-36" />
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Skeleton className="h-10 w-full max-w-xs" />
+        <Skeleton className="h-10 w-44" />
+      </div>
+      <ul className="grid gap-px border border-ink bg-ink sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map(card)}
+      </ul>
     </div>
   );
 }
@@ -454,15 +501,7 @@ export function ProjectsPage() {
 
   let body: ReactNode;
   if (orgStatus === 'unknown' || orgStatus === 'loading') {
-    body = (
-      <div
-        role="status"
-        aria-label="Loading organization"
-        className="flex justify-center py-24"
-      >
-        <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
-      </div>
-    );
+    body = <ProjectsSkeleton label="Loading organization" />;
   } else if (orgStatus === 'error') {
     body = (
       <div className="flex flex-col items-center gap-4 py-24 text-center">
@@ -499,15 +538,7 @@ export function ProjectsPage() {
       </div>
     );
   } else if (projectsStatus === 'unknown' || projectsStatus === 'loading') {
-    body = (
-      <div
-        role="status"
-        aria-label="Loading projects"
-        className="flex justify-center py-24"
-      >
-        <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
-      </div>
-    );
+    body = <ProjectsSkeleton label="Loading projects" />;
   } else if (projectsStatus === 'error') {
     body = (
       <div className="flex flex-col items-center gap-4 py-24 text-center">

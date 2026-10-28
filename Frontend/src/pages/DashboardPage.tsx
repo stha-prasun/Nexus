@@ -6,6 +6,7 @@ import { EmptyOrgView } from '@/components/dashboard/EmptyOrgView';
 import { NewProjectDialog } from '@/components/dashboard/NewProjectDialog';
 import { NoOrgView } from '@/components/dashboard/NoOrgView';
 import { OrgView, RolePicker } from '@/components/dashboard/OrgView';
+import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import {
   ApiError,
@@ -109,6 +110,98 @@ function EditOrgFields({
         />
       </Field>
     </>
+  );
+}
+
+/** Layout-matching placeholder while the org roster loads. */
+function DashboardSkeleton({ label }: { label: string }) {
+  const memberRow = (index: number) => (
+    <li
+      key={index}
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_120px_100px_72px]"
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <Skeleton className="h-9 w-9 shrink-0" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+      <div className="order-3 col-span-2 sm:order-none sm:col-span-1">
+        <Skeleton className="h-3.5 w-40" />
+      </div>
+      <div className="hidden sm:block">
+        <Skeleton className="h-5 w-16" />
+      </div>
+      <div className="hidden sm:block">
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <div className="hidden sm:block">
+        <Skeleton className="h-3.5 w-14" />
+      </div>
+    </li>
+  );
+  const projectCard = (index: number) => (
+    <li
+      key={index}
+      className="bg-white p-5"
+      style={{ boxShadow: 'inset 0 4px 0 #CDD0E0' }}
+    >
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-3 w-6" />
+        <Skeleton className="h-4 w-14" />
+      </div>
+      <Skeleton className="mt-6 h-5 w-3/4" />
+      <Skeleton className="mt-3 h-3.5 w-full" />
+      <Skeleton className="mt-2 h-3.5 w-2/3" />
+      <Skeleton className="mt-4 h-3 w-1/2" />
+    </li>
+  );
+  return (
+    <div role="status" aria-label={label} className="space-y-10">
+      <section className="dots relative overflow-hidden bg-cobalt p-6 text-white sm:p-8">
+        <div className="relative flex flex-wrap items-center justify-between gap-6">
+          <div className="w-full min-w-0 max-w-md">
+            <Skeleton tone="light" className="h-14 w-14" />
+            <Skeleton tone="light" className="mt-4 h-9 w-2/3" />
+            <Skeleton tone="light" className="mt-3 h-4 w-40" />
+            <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-3">
+              <Skeleton tone="light" className="h-6 w-24" />
+              <Skeleton tone="light" className="h-6 w-24" />
+              <Skeleton tone="light" className="h-7 w-32" />
+            </div>
+            <Skeleton tone="light" className="mt-5 h-9 w-44" />
+          </div>
+          <div className="hidden h-56 w-full max-w-[400px] md:block">
+            <Skeleton tone="light" className="h-full w-full" />
+          </div>
+        </div>
+      </section>
+
+      <Skeleton className="h-4 w-2/3 max-w-2xl" />
+
+      <section>
+        <div className="mb-3 flex items-end justify-between">
+          <Skeleton className="h-7 w-36" />
+          <Skeleton className="h-10 w-32" />
+        </div>
+        <div className="border border-ink">
+          <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_120px_100px_72px]">
+            {['w-16', 'w-14', 'w-14', 'w-16', 'w-8'].map((width) => (
+              <Skeleton key={width} className={`h-3 ${width}`} />
+            ))}
+          </div>
+          <ul>{[0, 1, 2, 3].map(memberRow)}</ul>
+        </div>
+      </section>
+
+      <section>
+        <div className="mb-3 flex items-end justify-between">
+          <Skeleton className="h-7 w-40" />
+          <Skeleton className="h-4 w-20" />
+        </div>
+        <ul className="grid gap-px border border-ink bg-ink-line sm:grid-cols-2 lg:grid-cols-3">
+          {[0, 1, 2].map(projectCard)}
+        </ul>
+      </section>
+    </div>
   );
 }
 
@@ -456,13 +549,7 @@ export function DashboardPage() {
         className={org ? 'view-in' : undefined}
       >
         {orgStatus === 'unknown' || orgStatus === 'loading' ? (
-          <div
-            role="status"
-            aria-label="Loading organization"
-            className="flex justify-center py-24"
-          >
-            <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
-          </div>
+          <DashboardSkeleton label="Loading organization" />
         ) : orgStatus === 'error' ? (
           <div className="flex flex-col items-center gap-4 py-24 text-center">
             <p className="text-[15px] font-semibold text-ink">
@@ -497,13 +584,7 @@ export function DashboardPage() {
               </button>
             </div>
           ) : displayMembers.length === 0 ? (
-            <div
-              role="status"
-              aria-label="Loading members"
-              className="flex justify-center py-24"
-            >
-              <span className="h-8 w-8 animate-spin rounded-full border-[3px] border-ink-line border-t-cobalt" />
-            </div>
+            <DashboardSkeleton label="Loading members" />
           ) : (
             <OrgView
               org={org}
