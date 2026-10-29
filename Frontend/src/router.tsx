@@ -8,6 +8,7 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProfilePage } from '@/pages/ProfilePage';
+import { ProjectBoardPage } from '@/pages/ProjectBoardPage';
 import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
 import { ProjectsPage } from '@/pages/ProjectsPage';
 import { SignupPage } from '@/pages/SignupPage';
@@ -62,6 +63,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <ProjectDetailPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'dashboard/projects/:id/board',
+        element: (
+          <RequireAuth>
+            <ProjectBoardPage />
           </RequireAuth>
         ),
       },

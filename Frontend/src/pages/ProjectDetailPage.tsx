@@ -14,6 +14,7 @@ import {
   type Project,
   updateProject,
 } from '@/lib/api';
+import { STATUSES } from '@/lib/board';
 import { CURRENT_USER, INPUT, pad2, ROLES, toRoleKey } from '@/lib/dashboard';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
@@ -60,16 +61,6 @@ const COUNTS: Record<string, number> = {
   resolved: 1,
   done: 2,
 };
-
-const STATUSES = [
-  { k: 'todo', label: 'To do', color: '#8A90AD' },
-  { k: 'progress', label: 'In progress', color: '#1F2FE0' },
-  { k: 'review', label: 'In review', color: '#FFD83D' },
-  { k: 'hold', label: 'On hold', color: '#E5484D' },
-  { k: 'testing', label: 'Testing', color: '#0EA5A5' },
-  { k: 'resolved', label: 'Resolved', color: '#2FB67C' },
-  { k: 'done', label: 'Done', color: '#14183A' },
-];
 
 const TASK_TOTAL = STATUSES.reduce((n, s) => n + (COUNTS[s.k] ?? 0), 0);
 
@@ -543,9 +534,11 @@ export function ProjectDetailPage() {
                 </p>
               ) : null}
             </div>
-            {/* Board route lands later — wired up when it exists. */}
             <button
               type="button"
+              onClick={() =>
+                navigate(`/dashboard/projects/${project.id}/board`)
+              }
               className="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 text-left font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0"
             >
               Open board
@@ -656,6 +649,7 @@ export function ProjectDetailPage() {
           </ul>
           <button
             type="button"
+            onClick={() => navigate(`/dashboard/projects/${project.id}/board`)}
             className="mt-4 inline-flex items-center gap-2 bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
           >
             Go to the task board →

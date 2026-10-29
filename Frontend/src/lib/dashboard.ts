@@ -174,7 +174,7 @@ export const EMAIL_PATTERN = /^\S+@\S+\.\S+$/;
 export const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 export const INPUT =
-  'w-full border border-ink/40 bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-soft/60 outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25';
+  'w-full border border-ink/40 bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-soft/60 outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25 disabled:bg-paper disabled:text-ink-soft';
 
 export const BTN =
   'bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark';

@@ -7,6 +7,12 @@ export interface DialogConfig {
   ok: string;
   danger?: boolean;
   validate?: (data: FormData) => string;
+  /** Design's ask(): hide the confirm button — dismiss-only dialogs. */
+  hideOk?: boolean;
+  /** Dismiss-button label — defaults to "Close" when hideOk, else "Cancel". */
+  cancelLabel?: string;
+  /** Dialog width — the task dialog's 2-column grid needs the design's max-w-lg. */
+  size?: 'md' | 'lg';
 }
 
 /**
@@ -41,7 +47,7 @@ export function useDialog() {
     if (config && dialog && !dialog.open) {
       dialog.showModal();
       const first = dialog.querySelector<HTMLElement>(
-        'input:not([type="hidden"]), select, button',
+        'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button',
       );
       first?.focus();
     }
@@ -65,7 +71,10 @@ export function useDialog() {
         event.preventDefault();
         done(null);
       }}
-      className="fixed left-1/2 top-1/2 z-50 m-0 max-h-[85vh] w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 overflow-y-auto border-2 border-ink bg-white p-0 shadow-[8px_8px_0_#14183A] [&::backdrop]:bg-ink/50"
+      className={cn(
+        'fixed left-1/2 top-1/2 z-50 m-0 max-h-[85vh] w-[92%] -translate-x-1/2 -translate-y-1/2 overflow-y-auto border-2 border-ink bg-white p-0 shadow-[8px_8px_0_#14183A] [&::backdrop]:bg-ink/50',
+        config?.size === 'lg' ? 'max-w-lg' : 'max-w-md',
+      )}
     >
       <form onSubmit={handleSubmit} className="p-6" noValidate>
         <h2 className="font-display text-xl font-bold tracking-tight">
@@ -88,19 +97,21 @@ export function useDialog() {
             onClick={() => done(null)}
             className="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper"
           >
-            Cancel
+            {config?.cancelLabel ?? (config?.hideOk ? 'Close' : 'Cancel')}
           </button>
-          <button
-            type="submit"
-            className={cn(
-              'px-4 py-2 text-sm font-semibold text-white',
-              config?.danger
-                ? 'bg-red-600 hover:bg-red-700'
-                : 'bg-cobalt hover:bg-cobalt-dark',
-            )}
-          >
-            {config?.ok}
-          </button>
+          {config?.hideOk ? null : (
+            <button
+              type="submit"
+              className={cn(
+                'px-4 py-2 text-sm font-semibold text-white',
+                config?.danger
+                  ? 'bg-red-600 hover:bg-red-700'
+                  : 'bg-cobalt hover:bg-cobalt-dark',
+              )}
+            >
+              {config?.ok}
+            </button>
+          )}
         </div>
       </form>
     </dialog>

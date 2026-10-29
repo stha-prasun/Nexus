@@ -9,6 +9,8 @@ interface AppShellProps {
   crumb: ReactNode;
   onLogout: () => void;
   children: ReactNode;
+  /** Board-style pages — drops the max-w-6xl reading measure. */
+  wide?: boolean;
 }
 
 export function AppShell({
@@ -17,6 +19,7 @@ export function AppShell({
   crumb,
   onLogout,
   children,
+  wide = false,
 }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -29,7 +32,13 @@ export function AppShell({
           menuOpen={sidebarOpen}
           onMenuToggle={() => setSidebarOpen((value) => !value)}
         />
-        <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">
+        <main
+          className={
+            wide
+              ? 'w-full px-4 py-8 sm:px-8'
+              : 'mx-auto w-full max-w-6xl px-4 py-8 sm:px-8'
+          }
+        >
           {children}
         </main>
       </div>
