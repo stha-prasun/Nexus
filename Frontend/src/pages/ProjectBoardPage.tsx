@@ -13,6 +13,7 @@ import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { LockIcon } from '@/components/dashboard/Icons';
 import { Avatar, RoleBadge } from '@/components/dashboard/OrgView';
+import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import { logout, type Project, type ProjectMember, type User } from '@/lib/api';
 import {
@@ -24,7 +25,12 @@ import {
   statusLabel,
 } from '@/lib/board';
 import { BTN, CURRENT_USER, INPUT, ROLES, toRoleKey } from '@/lib/dashboard';
-import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
+import {
+  useAppDispatch,
+  useAppSelector,
+  useOrganization,
+  useProjects,
+} from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
 import { clearMembers } from '@/store/slices/membersSlice';
 import { clearOrg } from '@/store/slices/orgSlice';
@@ -252,6 +258,64 @@ function LockedScreen({
   );
 }
 
+/** Layout-matching placeholder for the board while org/projects load. */
+function BoardSkeleton({ label }: { label: string }) {
+  const column = (key: number) => (
+    <div key={key} className="flex w-[272px] shrink-0 flex-col gap-3">
+      <div className="flex items-center gap-2 py-2">
+        <Skeleton className="h-2.5 w-2.5" />
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="ml-auto h-3 w-5" />
+      </div>
+      {[0, 1].map((card) => (
+        <div key={card} className="border border-ink-line bg-white p-3">
+          <div className="flex items-center justify-between">
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-3 w-14" />
+          </div>
+          <Skeleton className="mt-3 h-4 w-full" />
+          <Skeleton className="mt-2 h-4 w-4/5" />
+          <div className="mt-4 flex items-center justify-between">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-6 w-6" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+  return (
+    <div role="status" aria-label={label} className="space-y-4">
+      <div
+        className="border border-ink p-5 pl-7 sm:p-6 sm:pl-8"
+        style={{ boxShadow: 'inset 6px 0 0 #CDD0E0' }}
+      >
+        <Skeleton className="h-4 w-44" />
+        <Skeleton className="mt-3 h-8 w-80 max-w-full" />
+        <Skeleton className="mt-3 h-4 w-96 max-w-full" />
+        <div className="mt-5 flex flex-wrap items-center gap-4">
+          <div className="flex -space-x-px">
+            <Skeleton className="h-7 w-7" />
+            <Skeleton className="h-7 w-7" />
+            <Skeleton className="h-7 w-7" />
+          </div>
+          <div className="w-56 max-w-full">
+            <Skeleton className="h-3.5 w-28" />
+            <Skeleton className="mt-2 h-2 w-full" />
+          </div>
+          <Skeleton className="ml-auto h-9 w-32" />
+        </div>
+      </div>
+      <div className="flex gap-3">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-10 w-32" />
+      </div>
+      <div className="flex gap-3 overflow-hidden">
+        {[0, 1, 2, 3, 4].map(column)}
+      </div>
+    </div>
+  );
+}
+
 export function ProjectBoardPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -259,11 +323,22 @@ export function ProjectBoardPage() {
   const { show, element: toastElement } = useToast();
   const { ask, element: dialogElement } = useDialog();
   const authUser = useAppSelector((session) => session.auth.user);
-  const known = useAppSelector((state) => state.projects.projects);
-  const { org } = useOrganization();
+  const {
+    org,
+    status: orgStatus,
+    error: orgError,
+    retry: retryOrg,
+  } = useOrganization();
+  const {
+    projects: known,
+    status: projectsStatus,
+    error: projectsError,
+    retry: retryProjects,
+  } = useProjects();
 
   // Store project when known; the design's demo stands in while the list is
-  // empty — this page deliberately never fetches (static board).
+  // still empty. Org/list hydration is skeletoned below, so the demo only
+  // appears once loading has genuinely finished.
   const stored = known.find((project) => project.id === id);
   const project =
     stored ?? (known.length === 0 ? demoProject(id, authUser) : null);
@@ -863,7 +938,48 @@ export function ProjectBoardPage() {
   );
 
   let body: ReactNode;
-  if (access === 'missing') {
+  if (orgStatus === 'unknown' || orgStatus === 'loading') {
+    body = <BoardSkeleton label="Loading organization" />;
+  } else if (orgStatus === 'error') {
+    body = (
+      <div className="flex flex-col items-center gap-4 py-24 text-center">
+        <p className="text-[15px] font-semibold text-ink">
+          Couldn&apos;t load your organization.
+        </p>
+        <p className="max-w-sm text-sm text-ink-soft">{orgError.join(' ')}</p>
+        <button
+          type="button"
+          onClick={retryOrg}
+          className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  } else if (
+    org &&
+    (projectsStatus === 'unknown' || projectsStatus === 'loading')
+  ) {
+    body = <BoardSkeleton label="Loading projects" />;
+  } else if (org && projectsStatus === 'error') {
+    body = (
+      <div className="flex flex-col items-center gap-4 py-24 text-center">
+        <p className="text-[15px] font-semibold text-ink">
+          Couldn&apos;t load your projects.
+        </p>
+        <p className="max-w-sm text-sm text-ink-soft">
+          {projectsError.join(' ')}
+        </p>
+        <button
+          type="button"
+          onClick={retryProjects}
+          className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  } else if (access === 'missing') {
     body = (
       <LockedScreen
         title="Project not found"
