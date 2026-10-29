@@ -294,6 +294,11 @@ export function ProjectBoardPage() {
   const bodyRefs = useRef<Partial<Record<StatusKey, HTMLDivElement | null>>>(
     {},
   );
+  // Edge auto-scroll while dragging — refs only, so gliding never re-renders.
+  const boardRef = useRef<HTMLDivElement>(null);
+  const pointerXRef = useRef<number | null>(null);
+  const scrollDirRef = useRef<-1 | 0 | 1>(0);
+  const rafRef = useRef<number | null>(null);
 
   const members = project?.members ?? [];
   const currentUserId = authUser?.id ?? null;
@@ -322,6 +327,14 @@ export function ProjectBoardPage() {
       ? `${project.name} board · Nexus`
       : 'Board · Nexus';
   }, [project]);
+
+  // Empty deps on purpose: the cleanup only cancels a ref-held frame, so
+  // dropTarget re-renders mid-drag can never kill an active scroll.
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   /** This device only — same action as the sidebar Log out. */
   const handleLogout = (): void => {
@@ -397,6 +410,8 @@ export function ProjectBoardPage() {
   const handleDrop = (event: DragEvent, status: StatusKey): void => {
     if (dragId === null) return;
     event.preventDefault();
+    pointerXRef.current = null;
+    stopAutoScroll();
     const id = dragId;
     const beforeId = dropTarget?.status === status ? dropTarget.beforeId : null;
     setDragId(null);
@@ -405,8 +420,83 @@ export function ProjectBoardPage() {
   };
 
   const handleDragEnd = (): void => {
+    pointerXRef.current = null;
+    stopAutoScroll();
     setDragId(null);
     setDropTarget(null);
+  };
+
+  const stopAutoScroll = (): void => {
+    scrollDirRef.current = 0;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  };
+
+  /** One edge-scroll frame; speed grows quadratically toward the board edge. */
+  const tick = (): void => {
+    rafRef.current = null;
+    const board = boardRef.current;
+    const x = pointerXRef.current;
+    const dir = scrollDirRef.current;
+    if (!board || x === null || dir === 0) {
+      stopAutoScroll();
+      return;
+    }
+    const rect = board.getBoundingClientRect();
+    const zone = Math.min(120, rect.width / 4);
+    const distance = dir === -1 ? x - rect.left : rect.right - x;
+    if (distance > zone) {
+      stopAutoScroll();
+      return;
+    }
+    const strength = Math.max(0, 1 - distance / zone);
+    board.scrollLeft += dir * 15 * strength * strength;
+    rafRef.current = requestAnimationFrame(tick);
+  };
+
+  /** Re-derive the direction (-1 left, 0 none, 1 right) from the last pointer. */
+  const updateAutoScrollDir = (): void => {
+    const board = boardRef.current;
+    const x = pointerXRef.current;
+    if (!board || x === null) {
+      stopAutoScroll();
+      return;
+    }
+    const rect = board.getBoundingClientRect();
+    const zone = Math.min(120, rect.width / 4);
+    const fromLeft = x - rect.left;
+    const fromRight = rect.right - x;
+    const dir =
+      fromLeft <= zone && fromLeft < fromRight ? -1 : fromRight <= zone ? 1 : 0;
+    if (dir === scrollDirRef.current) return;
+    scrollDirRef.current = dir;
+    if (dir === 0) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    } else if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  };
+
+  /** Board-level dragover — bubbles up from columns, gaps, strips and headers. */
+  const trackBoardDrag = (event: DragEvent<HTMLDivElement>): void => {
+    if (dragId === null) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    pointerXRef.current = event.clientX;
+    updateAutoScrollDir();
+  };
+
+  /** Pointer left the board entirely — glide stops until it returns. */
+  const handleBoardDragLeave = (event: DragEvent<HTMLDivElement>): void => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      pointerXRef.current = null;
+      stopAutoScroll();
+    }
   };
 
   const handleCardKeyDown = (
@@ -814,10 +904,12 @@ export function ProjectBoardPage() {
     );
     const doneCount = tasks.filter((task) => task.status === 'done').length;
     const total = tasks.length;
+    // Zero-count segments stay mounted at 0% — so a status sliding in/out of
+    // the bar animates its width instead of popping into existence.
     const segments = STATUSES.map((status) => ({
       status,
       count: tasks.filter((task) => task.status === status.k).length,
-    })).filter((segment) => segment.count > 0);
+    }));
 
     body = (
       <>
@@ -881,6 +973,7 @@ export function ProjectBoardPage() {
                     <span
                       key={status.k}
                       title={`${status.label}: ${count}`}
+                      className="transition-[width] duration-500 ease-out"
                       style={{
                         width: `${total > 0 ? (count / total) * 100 : 0}%`,
                         background: status.color,
@@ -930,10 +1023,16 @@ export function ProjectBoardPage() {
           </p>
         </div>
 
-        <div
+        {/* No scrollbar-width here: the standard property would make Chromium
+            skip the app-wide ::-webkit-scrollbar rules (index.css), leaving the
+            horizontal bar native while the page's vertical one stays custom. */}
+        <section
           id="board"
+          aria-label="Task board columns"
+          ref={boardRef}
           className="mt-4 flex gap-3 overflow-x-auto pb-4"
-          style={{ scrollbarWidth: 'thin' }}
+          onDragOver={trackBoardDrag}
+          onDragLeave={handleBoardDragLeave}
         >
           {STATUSES.map((status) => {
             const count = tasks.filter(
@@ -1046,7 +1145,7 @@ export function ProjectBoardPage() {
               </section>
             );
           })}
-        </div>
+        </section>
       </>
     );
   }
