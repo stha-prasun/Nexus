@@ -2,13 +2,6 @@ import type { Project } from '@/lib/api';
 import { initials, tint, toRoleKey } from '@/lib/dashboard';
 import { RoleBadge } from './OrgView';
 
-const addedOn = (iso: string): string =>
-  new Date(iso).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
 function Avatar({ name }: { name: string }) {
   return (
     <span
@@ -20,7 +13,7 @@ function Avatar({ name }: { name: string }) {
   );
 }
 
-const COLUMNS = 'sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]';
+const COLUMNS = 'sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px]';
 
 interface ProjectMemberTableProps {
   project: Project;
@@ -30,9 +23,9 @@ interface ProjectMemberTableProps {
 
 /**
  * The read-only member table on the project detail page (design:
- * project.html): avatar + name, email, org role, the in-project flag
- * (Lead / Member) and the date they were added. Membership itself is
- * edited through the Manage members dialog, so rows carry no controls.
+ * project.html): avatar + name, email, org role, and the in-project flag
+ * (Lead → Owner → Member). Membership itself is edited through the Manage
+ * members drawer, so rows carry no controls.
  */
 export function ProjectMemberTable({
   project,
@@ -61,7 +54,7 @@ export function ProjectMemberTable({
         <span className="order-3 col-span-2 truncate text-sm text-ink-soft sm:order-none sm:col-span-1">
           {member.email}
         </span>
-        <div className="hidden sm:block">
+        <div>
           <RoleBadge role={toRoleKey(member.role)} />
         </div>
         <div className="hidden sm:block">
@@ -69,13 +62,14 @@ export function ProjectMemberTable({
             <span className="inline-block bg-sun px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-ink">
               Lead
             </span>
+          ) : member.userId === project.createdByUserId ? (
+            <span className="inline-block border border-cobalt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-cobalt">
+              Owner
+            </span>
           ) : (
             <span className="text-sm text-ink-soft">Member</span>
           )}
         </div>
-        <span className="hidden text-sm text-ink-soft sm:block">
-          {addedOn(member.addedAt)}
-        </span>
       </li>
     );
   });
@@ -89,7 +83,6 @@ export function ProjectMemberTable({
         <span>Email</span>
         <span>Org role</span>
         <span>In this project</span>
-        <span>Added</span>
       </div>
       <ul>{rows}</ul>
     </div>

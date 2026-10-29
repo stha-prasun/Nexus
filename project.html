@@ -62,6 +62,23 @@
     </div>
   </div>
 
+  <dialog id="drawer" aria-labelledby="drawer-title" class="m-0 ml-auto h-screen max-h-none w-full max-w-md border-l-2 border-ink p-0 backdrop:bg-ink/50">
+    <div class="flex h-full flex-col">
+      <header class="flex items-start justify-between gap-4 border-b border-ink px-5 py-4">
+        <div><h2 id="drawer-title" class="font-display text-xl font-bold tracking-tight">Manage members</h2><p id="drawer-sub" class="mt-0.5 text-sm text-ink-soft"></p></div>
+        <button type="button" id="drawer-close" aria-label="Close" class="border border-ink px-2.5 py-0.5 text-lg leading-none hover:bg-ink hover:text-white">×</button>
+      </header>
+      <div class="border-b border-ink-line px-5 py-3"><input id="drawer-q" type="search" placeholder="Search people" autocomplete="off" aria-label="Search people" class="w-full border border-ink/40 bg-white px-3.5 py-2 text-[15px] outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25" /></div>
+      <div id="drawer-body" class="flex-1 overflow-auto"></div>
+      <footer class="border-t border-ink px-5 py-4">
+        <p id="drawer-summary" class="mb-3 text-sm text-ink-soft"></p>
+        <div class="flex justify-end gap-2">
+          <button type="button" id="drawer-cancel" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper">Cancel</button>
+          <button type="button" id="drawer-save" class="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark disabled:opacity-40 disabled:hover:bg-cobalt">Save members</button>
+        </div>
+      </footer>
+    </div>
+  </dialog>
   <dialog id="dlg" class="w-[92%] max-w-lg border-2 border-ink p-0 shadow-[8px_8px_0_#14183A] backdrop:bg-ink/50">
     <form id="dlg-form" class="max-h-[90vh] overflow-auto p-6" novalidate>
       <h2 id="dlg-title" class="font-display text-xl font-bold tracking-tight"></h2>
@@ -94,11 +111,12 @@
       { name: 'Dana Ortiz',  email: 'dana@acme.com',  role: 'hr' },
       { name: 'Priya Patel', email: 'priya@acme.com', role: 'dev' },
       { name: 'Lena Wu',     email: 'lena@acme.com',  role: 'dev' },
+      { name: 'Rahul',       email: 'rahul@acme.com', role: 'dev', invited: true },
     ];
     const PROJECTS = [
-      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
-      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
-      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', lead: 'tomas@acme.com', members: ['tomas@acme.com', 'lena@acme.com'] },
+      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
+      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
+      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', owner: 'tomas@acme.com', lead: null, members: ['tomas@acme.com', 'lena@acme.com'] },
     ];
     // Task counts per status. In the real app these come from the API; the task list itself lives on the board page.
     const COUNTS = {
@@ -121,7 +139,8 @@
     /* ---------- Permissions (same rules as the board) ---------- */
     const byEmail = (e) => members.find((m) => m.email === e);
     const role = () => byEmail(VIEWER).role;
-    const full = () => role() === 'admin' || (role() === 'pm' && project.lead === VIEWER);
+    // Admins, and the PM who owns the project, manage it (edit, delete, members, lead). The lead is a Dev who runs the board.
+    const manage = () => role() === 'admin' || (role() === 'pm' && project.owner === VIEWER);
     const access = () => !project ? 'missing' : role() === 'hr' ? 'hr' : (role() === 'admin' || project.members.includes(VIEWER)) ? 'ok' : 'denied';
 
     /* ---------- Helpers ---------- */
@@ -190,11 +209,12 @@
     /* ---------- Overview ---------- */
     function overview() {
       const lead = byEmail(project.lead);
-      const people = [project.lead, ...project.members.filter((e) => e !== project.lead)].map(byEmail);
+      const people = [...new Set([project.lead, project.owner, ...project.members].filter(Boolean))].map(byEmail).filter(Boolean);
       const counts = COUNTS[project.id] || {}, total = STATUSES.reduce((n, s) => n + (counts[s.k] || 0), 0), done = counts.done || 0;
-      const access = role() === 'admin' ? 'Admin · oversight' : project.lead === VIEWER ? 'You lead this project' : 'Member';
-      const note = full()
-        ? (role() === 'admin' ? 'As an admin you can oversee every project, and create, edit, assign and move any task.' : 'As the project lead you can create, edit, assign and delete tasks, and move any task on the board.')
+      const access = role() === 'admin' ? 'Admin · oversight' : project.owner === VIEWER ? 'You manage this project' : project.lead === VIEWER ? 'You lead this project' : 'Member';
+      const note = role() === 'admin' ? 'As an admin you can oversee every project, and edit, assign and move any task.'
+        : manage() ? 'You manage this project: edit it, change its members and lead, and work with any task. The lead, a Dev, runs the board day to day.'
+        : project.lead === VIEWER ? 'You lead this project: create, edit, assign and move any task on the board. A PM or Admin manages the project itself.'
         : 'You can see every task on the board, and move the ones assigned to you.';
 
       const rows = people.map((m) => `
@@ -202,7 +222,7 @@
           <div class="flex min-w-0 items-center gap-3">${avatar(m.name)}<span class="truncate font-semibold">${esc(m.name)}${m.email === VIEWER ? ' <span class="font-normal text-ink-soft">(you)</span>' : ''}</span></div>
           <span class="order-3 col-span-2 truncate text-sm text-ink-soft sm:order-none sm:col-span-1">${esc(m.email)}</span>
           <div>${badge(m.role)}</div>
-          <div class="hidden sm:block">${m.email === project.lead ? '<span class="inline-block bg-sun px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-ink">Lead</span>' : '<span class="text-sm text-ink-soft">Member</span>'}</div>
+          <div class="hidden sm:block">${m.email === project.lead ? '<span class="inline-block bg-sun px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-ink">Lead</span>' : m.email === project.owner ? '<span class="inline-block border border-cobalt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-cobalt">Owner</span>' : '<span class="text-sm text-ink-soft">Member</span>'}</div>
         </li>`).join('');
 
       const stat = (label, value) => `<div class="px-4 py-3 first:pl-0"><dt class="text-xs font-bold uppercase tracking-wider text-ink-soft">${label}</dt><dd class="mt-1 font-display text-xl font-bold leading-tight">${value}</dd></div>`;
@@ -213,7 +233,7 @@
           <div class="p-6 sm:p-8" style="box-shadow: inset 6px 0 0 ${project.color}">
             <div class="flex items-center justify-between gap-3 pl-2">
               <a href="projects.html" class="text-sm text-ink-soft hover:text-ink">← All projects</a>
-              ${full() ? '<button type="button" data-action="edit" class="border border-ink px-3.5 py-1.5 text-sm font-semibold hover:bg-ink hover:text-white">Edit project</button>' : ''}
+              ${manage() ? '<button type="button" data-action="edit" class="border border-ink px-3.5 py-1.5 text-sm font-semibold hover:bg-ink hover:text-white">Edit project</button>' : ''}
             </div>
             <h1 class="mt-3 pl-2 font-display text-4xl font-bold leading-none tracking-tight">${esc(project.name)}</h1>
             ${project.description ? `<p class="mt-3 max-w-xl pl-2 text-ink-soft">${esc(project.description)}</p>` : ''}
@@ -221,15 +241,16 @@
           <a href="${link('project-board.html')}" class="group flex items-center justify-between gap-6 border-t border-ink bg-cobalt px-6 py-5 font-display text-lg font-bold text-white hover:bg-cobalt-dark md:flex-col md:items-start md:justify-between md:border-l md:border-t-0">Open board<span aria-hidden="true" class="text-2xl leading-none text-sun transition-transform group-hover:translate-x-1">→</span></a>
         </div>
         <dl class="grid grid-cols-2 divide-x divide-ink-line border-t border-ink-line px-4 sm:grid-cols-4 sm:px-8">
-          ${stat('Lead', esc(lead.name))}${stat('Members', project.members.length)}${stat('Tasks', total)}${stat('Your access', access)}
+          ${stat('Lead', lead ? esc(lead.name) : 'None yet')}${stat('Members', project.members.length)}${stat('Tasks', total)}${stat('Your access', access)}
         </dl>
       </div>
       <p class="mt-4 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">${note}</p>
+      ${manage() && !project.lead ? `<div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-l-4 border-red-600 bg-red-50 px-4 py-3"><p class="text-sm text-red-800"><strong>This project needs a lead.</strong> Pick a Dev to run the task board.</p><button type="button" data-action="pick-lead" class="bg-red-600 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-red-700">Choose a lead</button></div>` : ''}
 
       <section class="mt-10" aria-labelledby="h-people">
         <div class="mb-3 flex items-end justify-between gap-3">
           <h2 id="h-people" class="font-display text-2xl font-bold tracking-tight">Members <span class="ml-1 align-middle font-sans text-sm font-bold text-ink-soft">${pad(people.length)}</span></h2>
-          ${full() ? '<a href="projects.html" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white">Manage members</a>' : ''}
+          ${manage() ? '<button type="button" data-action="members" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white">Manage members</button>' : ''}
         </div>
         <div class="border border-ink">
           <div class="hidden grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px] gap-x-4 border-b border-ink bg-paper px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft sm:grid">
@@ -251,7 +272,7 @@
         <a href="${link('project-board.html')}" class="mt-4 inline-block ${BTN}">Go to the task board →</a>
       </section>
 
-      ${full() ? `
+      ${manage() ? `
       <section class="mt-12 border-2 border-red-600" aria-labelledby="h-danger">
         <div class="flex items-center gap-2 bg-red-600 px-5 py-2 text-white">
           <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="square" aria-hidden="true"><path d="M12 3L2 21h20L12 3zM12 10v5M12 18v.5"/></svg>
@@ -282,7 +303,102 @@
       v.classList.remove('view-in'); void v.offsetWidth; v.classList.add('view-in');
     }
 
+    /* ---------- Manage members: edit a draft, then save ---------- */
+    let draft = null;
+    const drawer = $('#drawer');
+    function openMembers() {
+      draft = { members: [...project.members], lead: project.lead, q: '' };
+      $('#drawer-q').value = '';
+      renderDrawer();
+      drawer.showModal();
+      $('#drawer-q').focus();
+    }
+    function renderDrawer() {
+      const q = draft.q.trim().toLowerCase();
+      const match = (m) => !q || (m.name + ' ' + m.email).toLowerCase().includes(q);
+      const lead = byEmail(draft.lead);
+      const team = draft.members.filter((e) => e !== draft.lead).map(byEmail).filter(Boolean);
+      const addable = members.filter((m) => m.role !== 'hr' && !draft.members.includes(m.email));   // HR doesn't work on projects
+      const added = draft.members.filter((e) => !project.members.includes(e)).length;
+      const removed = project.members.filter((e) => !draft.members.includes(e)).length;
+      const leadChanged = draft.lead !== project.lead, changed = added || removed || leadChanged;
+      const BTN_SM = 'border border-ink px-3 py-1.5 text-xs font-semibold hover:bg-ink hover:text-white';
+
+      const person = (m, right) => `<li class="flex items-center gap-3 border-b border-ink-line px-5 py-3">${avatar(m.name)}
+        <div class="min-w-0 flex-1"><p class="truncate font-semibold">${esc(m.name)}${m.email === VIEWER ? ' <span class="font-normal text-ink-soft">(you)</span>' : ''}</p><p class="truncate text-xs text-ink-soft">${esc(m.email)}</p></div>
+        ${badge(m.role)}<div class="ml-1 min-w-[4.5rem] text-right">${right}</div></li>`;
+      const head = (label, n = '') => `<p class="sticky top-0 z-10 flex items-center justify-between border-b border-ink-line bg-paper px-5 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft"><span>${label}</span><span>${n}</span></p>`;
+      const none = (t) => `<p class="px-5 py-6 text-center text-sm text-ink-soft">${t}</p>`;
+
+      // The lead sits in its own card with one clear button. Nothing else competes with it.
+      const leadCard = lead
+        ? `<div class="flex items-center gap-3 border-b border-ink-line border-l-4 border-l-sun bg-white px-5 py-4">${avatar(lead.name, 'h-11 w-11 text-sm')}
+            <div class="min-w-0 flex-1"><p class="truncate font-semibold">${esc(lead.name)}</p><p class="truncate text-xs text-ink-soft">${esc(lead.email)}</p></div>
+            <button type="button" data-a="change-lead" class="${BTN_SM}">Change</button></div>`
+        : `<div class="flex items-center gap-3 border-b border-ink-line border-l-4 border-l-red-600 bg-red-50 px-5 py-4">
+            <p class="min-w-0 flex-1 text-sm text-red-800"><strong>No lead yet.</strong> Pick a Dev to run the board.</p>
+            <button type="button" data-a="change-lead" class="${BTN_SM} bg-white">Choose lead</button></div>`;
+
+      const OWNER = '<span class="border border-cobalt px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider text-cobalt">Owner</span>';
+      const teamRows = team.filter(match).map((m) => person(m, m.email === project.owner ? OWNER
+        : `<button type="button" data-a="remove" data-e="${esc(m.email)}" class="text-sm text-ink-soft underline-offset-2 hover:text-red-600 hover:underline">Remove</button>`));
+      const addRows = addable.filter(match).map((m) => person(m, m.invited
+        ? '<span class="text-xs text-ink-soft">Invite pending</span>'
+        : `<button type="button" data-a="add" data-e="${esc(m.email)}" class="${BTN_SM}">Add</button>`));
+
+      const top = $('#drawer-body').scrollTop;
+      $('#drawer-body').innerHTML =
+        head('Project lead') + leadCard +
+        head('Team', team.length) + (teamRows.length ? `<ul>${teamRows.join('')}</ul>` : none(team.length ? 'No one matches your search.' : 'Just the lead so far.')) +
+        head(`Add from ${esc(ORG.name)}`, addable.length) + (addRows.length ? `<ul>${addRows.join('')}</ul>` : none(addable.length ? 'No one matches your search.' : 'Everyone in the organization is already on this project.')) +
+        `<p class="px-5 py-4 text-xs text-ink-soft">Only people already in the organization can be added. HR isn't listed, because HR doesn't work on projects. The lead is always a Dev, and the owner (the Admin or PM who manages the project) can't be removed here.</p>`;
+      $('#drawer-body').scrollTop = top;
+
+      $('#drawer-sub').textContent = `${project.name} · ${draft.members.length} member${draft.members.length === 1 ? '' : 's'}`;
+      $('#drawer-summary').textContent = !changed ? 'No changes yet.'
+        : [added && `${added} added`, removed && `${removed} removed`, leadChanged && 'lead changed'].filter(Boolean).join(' · ') + (removed ? '. Their tasks stay on the board, unassigned.' : '');
+      $('#drawer-save').disabled = !changed;
+    }
+
+    async function changeLead() {
+      const old = byEmail(draft.lead);
+      const eligible = members.filter((m) => m.role === 'dev' && !m.invited && m.email !== draft.lead);   // leads are Devs
+      const d = await ask({
+        title: old ? 'Change project lead' : 'Choose a project lead', ok: 'Set as lead',
+        body: `<p>${old ? `${esc(old.name)} leads this project now. ` : ''}The lead runs the task board day to day and must be a Dev. Admins and PMs manage the project, but can't be its lead.</p>
+          ${eligible.length ? `<ul class="divide-y divide-ink-line border border-ink-line">${eligible.map((m) => `<li><label class="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-paper"><input type="radio" name="lead" value="${esc(m.email)}" class="h-4 w-4 border-ink/40 text-cobalt focus:ring-cobalt/30">${avatar(m.name, 'h-8 w-8 text-[10px]')}<span class="min-w-0 flex-1"><span class="block truncate font-semibold text-ink">${esc(m.name)}</span><span class="block text-xs">${draft.members.includes(m.email) ? 'Already on this project' : 'Will be added to the project'}</span></span></label></li>`).join('')}</ul>`
+            : '<p class="border-l-4 border-red-500 bg-red-50 px-3 py-2 text-red-800">There are no other Devs in the organization yet.</p>'}
+          ${old ? `<label class="flex cursor-pointer items-start gap-2.5"><input type="checkbox" name="removeOld" class="mt-0.5 h-4 w-4 border-ink/40 text-cobalt"><span><span class="font-semibold text-ink">Also remove ${esc(old.name)} from this project</span><br>Otherwise they stay on as a regular member.</span></label>` : ''}`,
+        validate: (f) => f.get('lead') ? '' : eligible.length ? 'Choose who will lead the project.' : 'There is no one else who can lead this project yet.',
+      });
+      if (!d) return;
+      const next = d.get('lead');
+      if (!draft.members.includes(next)) draft.members.push(next);
+      const prev = draft.lead; draft.lead = next;
+      if (prev && d.get('removeOld')) draft.members = draft.members.filter((e) => e !== prev);
+      renderDrawer();
+    }
+    $('#drawer-body').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-a]'); if (!b) return;
+      const em = b.dataset.e;
+      if (b.dataset.a === 'add' && !draft.members.includes(em)) draft.members.push(em);
+      if (b.dataset.a === 'remove' && em !== draft.lead && em !== project.owner) draft.members = draft.members.filter((x) => x !== em);
+      if (b.dataset.a === 'change-lead') return changeLead();
+      renderDrawer();
+    });
+    $('#drawer-q').addEventListener('input', (e) => { draft.q = e.target.value; renderDrawer(); });
+    $('#drawer-close').addEventListener('click', () => drawer.close());
+    $('#drawer-cancel').addEventListener('click', () => drawer.close());
+    drawer.addEventListener('click', (e) => { if (e.target === drawer) drawer.close(); });
+    $('#drawer-save').addEventListener('click', () => {
+      project.members = [...new Set(draft.members.filter(Boolean))];   // TODO: PUT /projects/:id/members { members, lead }
+      project.lead = draft.lead;
+      drawer.close(); render(); toast('Members updated');
+    });
+
     const actions = {
+      members: openMembers,
+      'pick-lead'() { openMembers(); changeLead(); },
       async edit() {
         const d = await ask({
           title: 'Edit project', ok: 'Save changes',

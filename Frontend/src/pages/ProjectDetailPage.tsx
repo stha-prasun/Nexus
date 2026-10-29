@@ -182,6 +182,7 @@ export function ProjectDetailPage() {
   >('loading');
   const [error, setError] = useState<string[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
+  const [promptLead, setPromptLead] = useState(false);
 
   /** The server's project is the source of truth — synced to the list too. */
   const adopt = useCallback(
@@ -223,9 +224,13 @@ export function ProjectDetailPage() {
   }, [load]);
 
   const actorRole = authUser?.role;
-  const canManage = actorRole === 'Admin' || actorRole === 'PM';
   const currentUserId = authUser?.id;
   const members = project?.members ?? [];
+  // Mirror the server policy: Admin, or a PM who sits on the project.
+  const canManage =
+    actorRole === 'Admin' ||
+    (actorRole === 'PM' &&
+      members.some((member) => member.userId === currentUserId));
 
   /** This device only — same action as the sidebar Log out. */
   const handleLogout = (): void => {
@@ -408,13 +413,12 @@ export function ProjectDetailPage() {
             <Skeleton className="h-9 w-40" />
           </div>
           <div className="border border-ink">
-            <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]">
+            <div className="hidden gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px]">
               {[
                 { key: 'member', width: 'w-16' },
                 { key: 'email', width: 'w-14' },
                 { key: 'org-role', width: 'w-16' },
                 { key: 'in-this-project', width: 'w-24' },
-                { key: 'added', width: 'w-14' },
               ].map((header) => (
                 <Skeleton key={header.key} className={`h-3 ${header.width}`} />
               ))}
@@ -423,7 +427,7 @@ export function ProjectDetailPage() {
               {[0, 1, 2, 3].map((member) => (
                 <li
                   key={member}
-                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px_110px]"
+                  className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_110px_120px]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <Skeleton className="h-9 w-9 shrink-0" />
@@ -437,9 +441,6 @@ export function ProjectDetailPage() {
                   </div>
                   <div className="hidden sm:block">
                     <Skeleton className="h-4 w-14" />
-                  </div>
-                  <div className="hidden sm:block">
-                    <Skeleton className="h-3.5 w-20" />
                   </div>
                 </li>
               ))}
@@ -486,22 +487,26 @@ export function ProjectDetailPage() {
     const leads = members.filter((member) => member.isLead);
     const leadLabel = leads.length
       ? leads.map((member) => member.name).join(', ')
-      : project.createdByName;
+      : 'None yet';
     const isLead = members.some(
       (member) => member.userId === currentUserId && member.isLead,
     );
     const accessLabel =
       actorRole === 'Admin'
         ? 'Admin · oversight'
-        : isLead
-          ? 'You lead this project'
-          : 'Member';
+        : canManage
+          ? 'You manage this project'
+          : isLead
+            ? 'You lead this project'
+            : 'Member';
     const note =
       actorRole === 'Admin'
-        ? 'As an admin you can oversee every project, and create, edit, assign and move any task.'
-        : actorRole === 'PM'
-          ? 'As the project lead you can create, edit, assign and delete tasks, and move any task on the board.'
-          : 'You can see every task on the board, and move the ones assigned to you.';
+        ? 'As an admin you can oversee every project, and edit, assign and move any task.'
+        : canManage
+          ? 'You manage this project: edit it, change its members and lead, and work with any task. The lead, a Dev, runs the board day to day.'
+          : isLead
+            ? 'You lead this project: create, edit, assign and move any task on the board. A PM or Admin manages the project itself.'
+            : 'You can see every task on the board, and move the ones assigned to you.';
     const done = COUNTS.done ?? 0;
 
     body = (
@@ -562,6 +567,24 @@ export function ProjectDetailPage() {
         <p className="mt-4 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
           {note}
         </p>
+        {canManage && leads.length === 0 ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-l-4 border-red-600 bg-red-50 px-4 py-3">
+            <p className="text-sm text-red-800">
+              <strong>This project needs a lead.</strong> Pick a Dev to run the
+              task board.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setPromptLead(true);
+                setManageOpen(true);
+              }}
+              className="bg-red-600 px-3.5 py-1.5 text-sm font-semibold text-white hover:bg-red-700"
+            >
+              Choose a lead
+            </button>
+          </div>
+        ) : null}
 
         <section className="mt-10" aria-labelledby="p-members">
           <div className="mb-3 flex items-end justify-between gap-3">
@@ -707,8 +730,13 @@ export function ProjectDetailPage() {
         <ManageMembersDialog
           open
           project={project}
-          onClose={() => setManageOpen(false)}
+          openLeadPicker={promptLead}
+          onClose={() => {
+            setPromptLead(false);
+            setManageOpen(false);
+          }}
           onSaved={(updated) => {
+            setPromptLead(false);
             setManageOpen(false);
             adopt(updated);
             show('Members updated');
