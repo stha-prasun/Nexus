@@ -187,6 +187,15 @@
     }
 }
 
+/* Opt-out for rows that must never show a scrollbar track (project tabs):
+   still scrollable by touch/trackpad, just visually clean. */
+.no-scrollbar {
+    scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
 /* ===== Login page ===== */
 .canvas { background-color:#1F2FE0; background-image:radial-gradient(rgba(255,255,255,.32) 1.5px, transparent 1.5px); background-size:28px 28px; animation:drift 16s linear infinite; }
 .t { font:600 15px Figtree,sans-serif; fill:#14183A; }

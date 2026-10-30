@@ -98,9 +98,9 @@
       { name: 'Lena Wu',     email: 'lena@acme.com',  role: 'dev' },
     ];
     const PROJECTS = [
-      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
-      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', lead: 'jonas@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
-      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', lead: 'tomas@acme.com', members: ['tomas@acme.com', 'lena@acme.com'] },
+      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
+      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
+      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', owner: 'tomas@acme.com', lead: null, members: ['tomas@acme.com', 'lena@acme.com'] },
     ];
     // [title, status, assignee, priority, due in N days from today]
     const SEED = {
@@ -143,7 +143,8 @@
     /* ---------- Permissions ---------- */
     const byEmail = (e) => members.find((m) => m.email === e);
     const role = () => byEmail(VIEWER).role;
-    const full = () => role() === 'admin' || (role() === 'pm' && project.lead === VIEWER);   // create, edit, delete, assign, move any
+    const manage = () => role() === 'admin' || (role() === 'pm' && project.owner === VIEWER);   // manages the project itself
+    const full = () => manage() || project.lead === VIEWER;                                     // create, edit, delete, assign, move any task
     const canMove = (t) => full() || t.assignee === VIEWER;                                 // devs move only their own tasks
     const access = () => !project ? 'missing' : role() === 'hr' ? 'hr' : (role() === 'admin' || project.members.includes(VIEWER)) ? 'ok' : 'denied';
 
@@ -196,6 +197,14 @@
         if (onOpen) onOpen();
         const first = $('#dlg-body input:not([disabled]), #dlg-body select:not([disabled])'); if (first) first.focus();
       });
+    }
+
+    /* ---------- Project tabs (the same bar sits on all three project pages) ---------- */
+    const NAV_COUNTS = { tasks: { 1: 12, 2: 4, 3: 3 }, docs: { 1: 4, 2: 1, 3: 0 } };   // demo numbers; the page you are on passes its live count
+    function tabs(active, counts = {}) {
+      const n = { tasks: NAV_COUNTS.tasks[project.id], docs: NAV_COUNTS.docs[project.id], ...counts };
+      const item = (k, label, page, count) => `<a href="${link(page)}" ${active === k ? 'aria-current="page"' : ''} class="-mb-px flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold ${active === k ? 'border-cobalt text-ink' : 'border-transparent text-ink-soft hover:text-ink'}">${label}${count != null ? `<span class="bg-paper px-1.5 text-xs font-bold text-ink-soft">${count}</span>` : ''}</a>`;
+      return `<nav class="mt-5 flex overflow-x-auto border-b border-ink-line" aria-label="Project sections">${item('overview', 'Overview', 'project.html')}${item('board', 'Board', 'project-board.html', n.tasks)}${item('documents', 'Documents', 'project-documents.html', n.docs)}</nav>`;
     }
 
     /* ---------- Chrome ---------- */
@@ -280,19 +289,20 @@
       v.innerHTML = `
         <div class="flex flex-wrap items-start justify-between gap-4 border border-ink p-5 pl-7 sm:p-6 sm:pl-8" style="box-shadow: inset 6px 0 0 ${project.color}">
           <div class="min-w-0 max-w-2xl">
-            <a href="${link('project.html')}" class="text-sm text-ink-soft hover:text-ink">← Project overview</a>
+            <a href="projects.html" class="text-sm text-ink-soft hover:text-ink">← All projects</a>
             <h1 class="mt-2 font-display text-3xl font-bold leading-none tracking-tight">${esc(project.name)}</h1>
             ${project.description ? `<p class="mt-2 text-sm text-ink-soft">${esc(project.description)}</p>` : ''}
             <div class="mt-4 space-y-4">
               <button type="button" data-action="people" class="flex items-center gap-3" aria-label="View project members">
                 <span class="flex -space-x-px">${project.members.map(byEmail).slice(0, 5).map((m) => avatar(m.name, 'h-8 w-8 text-[10px]', 'ring-2 ring-white')).join('')}</span>
-                <span class="text-sm text-ink-soft underline-offset-2 hover:underline">${project.members.length} members · Lead: <strong class="text-ink">${esc(lead.name)}</strong></span></button>
+                <span class="text-sm text-ink-soft underline-offset-2 hover:underline">${project.members.length} members · Lead: <strong class="text-ink">${lead ? esc(lead.name) : 'none yet'}</strong></span></button>
               <div id="stats" class="w-full max-w-sm"></div>
             </div>
           </div>
           ${full() ? `<button type="button" data-action="new-task" data-s="todo" class="${BTN}">New task</button>` : ''}
         </div>
-        <div class="mt-5 flex flex-wrap items-center gap-3">
+        ${tabs('board', { tasks: tasks.length })}
+        <div class="mt-4 flex flex-wrap items-center gap-3">
           <input id="q" type="search" placeholder="Search tasks" value="${esc(ui.q)}" class="${INPUT} max-w-xs py-2" autocomplete="off" aria-label="Search tasks" />
           <button type="button" data-action="mine" aria-pressed="${ui.mine}" class="border border-ink px-3.5 py-2 text-sm font-semibold ${ui.mine ? 'bg-ink text-white' : 'hover:bg-paper'}">Only mine</button>
           <p class="ml-auto hidden text-xs text-ink-soft md:block">${full() ? 'Drag cards between columns, or focus one and use ← →.' : 'You can move tasks assigned to you. Drag them, or focus one and use ← →.'}</p>
@@ -408,7 +418,7 @@
       people() {
         ask({ title: 'Project members', ok: 'Close', hideOk: true,
           body: `<ul class="divide-y divide-ink-line border border-ink-line">${project.members.map(byEmail).map((m) => `<li class="flex items-center gap-3 px-3 py-2">${avatar(m.name, 'h-8 w-8 text-[10px]')}<span class="min-w-0 flex-1"><span class="block truncate font-semibold text-ink">${esc(m.name)}${m.email === project.lead ? ' <span class="bg-sun px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider">Lead</span>' : ''}</span><span class="block truncate text-xs">${esc(m.email)}</span></span>${badge(m.role)}</li>`).join('')}</ul>
-                 ${full() ? '<a href="projects.html" class="inline-block text-sm font-semibold text-cobalt underline-offset-2 hover:underline">Manage members on the Projects page</a>' : ''}` });
+                 ${manage() ? `<a href="${link('project.html')}" class="inline-block text-sm font-semibold text-cobalt underline-offset-2 hover:underline">Manage members on the project overview</a>` : ''}` });
       },
     };
     document.addEventListener('click', (e) => {

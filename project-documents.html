@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documents · Nexus</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Move to tailwind.config.ts when converting to React + TS
+    tailwind.config = {
+      theme: {
+        borderRadius: { none: '0', DEFAULT: '0', full: '9999px' },   // sharp by default
+        extend: {
+          fontFamily: {
+            display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+            sans: ['Figtree', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            cobalt: { DEFAULT: '#1F2FE0', dark: '#1521B5' },
+            ink: { DEFAULT: '#14183A', soft: '#5A6080', line: '#CDD0E0' },
+            sun: { DEFAULT: '#FFD83D', dark: '#F2C70F' },
+            paper: '#F5F6FB',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    .view-in { animation: rise .35s cubic-bezier(.2,.7,.2,1); }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body class="bg-white font-sans text-ink antialiased">
+  <div class="flex min-h-screen">
+
+    <aside id="sidebar" class="fixed inset-y-0 left-0 z-30 hidden w-60 shrink-0 flex-col border-r border-ink bg-white lg:sticky lg:top-0 lg:flex lg:h-screen">
+      <a href="dashboard.html" class="flex h-14 items-center gap-2.5 border-b border-ink-line px-4" aria-label="Nexus">
+        <svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 8.5v3.5M12 12l-5.5 4M12 12l5.5 4" stroke="#1F2FE0" stroke-width="1.8" stroke-linecap="round"/>
+          <circle cx="12" cy="6" r="3.5" fill="#FFD83D" stroke="#1F2FE0" stroke-width="1.8"/>
+          <circle cx="5.5" cy="17.5" r="2.5" fill="#1F2FE0"/><circle cx="18.5" cy="17.5" r="2.5" fill="#1F2FE0"/>
+        </svg>
+        <span class="font-display text-xl font-bold tracking-tight">Nexus</span>
+      </a>
+      <div class="p-3"><div id="org-block" class="flex w-full items-center gap-2.5 border border-ink px-2.5 py-2 text-sm"></div></div>
+      <p class="px-4 pb-1.5 pt-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">Workspace</p>
+      <nav id="nav" class="space-y-px px-3 text-sm" aria-label="Main"></nav>
+      <div id="me" class="mt-auto flex items-center gap-2.5 border-t border-ink-line p-4"></div>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="flex h-14 items-center justify-between border-b border-ink-line px-4 sm:px-8">
+        <button type="button" id="menu-btn" class="border border-ink px-3 py-1.5 text-sm font-semibold lg:hidden" aria-expanded="false" aria-controls="sidebar">Menu</button>
+        <p id="crumb" class="min-w-0 truncate text-sm text-ink-soft"></p>
+        <span class="hidden text-sm text-ink-soft sm:block" id="today"></span>
+      </header>
+      <main id="view" class="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8"></main>
+    </div>
+  </div>
+
+  <dialog id="dlg" class="w-[92%] max-w-lg border-2 border-ink p-0 shadow-[8px_8px_0_#14183A] backdrop:bg-ink/50">
+    <form id="dlg-form" class="max-h-[90vh] overflow-auto p-6" novalidate>
+      <h2 id="dlg-title" class="font-display text-xl font-bold tracking-tight"></h2>
+      <div id="dlg-body" class="mt-3 space-y-4 text-sm text-ink-soft"></div>
+      <p id="dlg-err" role="alert" class="mt-3 hidden border-l-4 border-red-500 bg-red-50 px-3 py-2 text-sm text-red-800"></p>
+      <div class="mt-5 flex justify-end gap-2">
+        <button type="button" id="dlg-cancel" class="border border-ink px-4 py-2 text-sm font-semibold hover:bg-paper">Cancel</button>
+        <button type="submit" id="dlg-ok" class="px-4 py-2 text-sm font-semibold text-white"></button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status" class="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 translate-y-2 bg-ink px-4 py-2.5 text-sm font-medium text-white opacity-0"></div>
+
+  <script>
+    /* ---------- Demo data ----------
+       ?id=1|2|3 picks the project. ?as=email picks who is signed in:
+       maya@acme.com Admin, jonas@acme.com PM (leads 1 and 2), tomas@acme.com PM (leads 3),
+       dana@acme.com HR, priya@acme.com / lena@acme.com Dev. */
+    const ORG = { name: 'Acme Design' };
+    const ROLES = {
+      admin: { label: 'Admin', cls: 'bg-sun text-ink' },
+      pm:    { label: 'PM',    cls: 'bg-cobalt text-white' },
+      hr:    { label: 'HR',    cls: 'bg-emerald-600 text-white' },
+      dev:   { label: 'Dev',   cls: 'border border-ink text-ink' },
+    };
+    const members = [
+      { name: 'Maya Kim',    email: 'maya@acme.com',  role: 'admin' },
+      { name: 'Jonas Weber', email: 'jonas@acme.com', role: 'pm' },
+      { name: 'Tomás Reyes', email: 'tomas@acme.com', role: 'pm' },
+      { name: 'Dana Ortiz',  email: 'dana@acme.com',  role: 'hr' },
+      { name: 'Priya Patel', email: 'priya@acme.com', role: 'dev' },
+      { name: 'Lena Wu',     email: 'lena@acme.com',  role: 'dev' },
+      { name: 'Rahul',       email: 'rahul@acme.com', role: 'dev', invited: true },
+    ];
+    const PROJECTS = [
+      { id: 1, name: 'Website relaunch', description: 'Rebuild the marketing site and move it to the new CMS.', color: '#FFD83D', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com', 'lena@acme.com'] },
+      { id: 2, name: 'Mobile app',       description: 'Ship the first version of the iOS and Android apps.',    color: '#2FB67C', owner: 'jonas@acme.com', lead: 'priya@acme.com', members: ['jonas@acme.com', 'priya@acme.com'] },
+      { id: 3, name: 'Brand refresh',    description: 'New logo, palette and design guidelines.',               color: '#E5484D', owner: 'tomas@acme.com', lead: null, members: ['tomas@acme.com', 'lena@acme.com'] },
+    ];
+    // Task counts per status. In the real app these come from the API; the task list itself lives on the board page.
+    const COUNTS = {
+      1: { todo: 3, progress: 2, review: 2, hold: 1, testing: 1, resolved: 1, done: 2 },
+      2: { todo: 1, progress: 1, review: 1, hold: 0, testing: 0, resolved: 0, done: 1 },
+      3: { todo: 1, progress: 1, review: 1, hold: 0, testing: 0, resolved: 0, done: 0 },
+    };
+    const STATUSES = [
+      { k: 'todo', label: 'To do', color: '#8A90AD' }, { k: 'progress', label: 'In progress', color: '#1F2FE0' },
+      { k: 'review', label: 'In review', color: '#FFD83D' }, { k: 'hold', label: 'On hold', color: '#E5484D' },
+      { k: 'testing', label: 'Testing', color: '#0EA5A5' }, { k: 'resolved', label: 'Resolved', color: '#2FB67C' },
+      { k: 'done', label: 'Done', color: '#14183A' },
+    ];
+
+    const params = new URLSearchParams(location.search);
+    const VIEWER = members.some((m) => m.email === params.get('as')) ? params.get('as') : 'maya@acme.com';   // in the real app: the signed-in user
+    const project = PROJECTS.find((p) => p.id === +(params.get('id') || 1));
+    const link = (page) => `${page}?id=${project ? project.id : 1}` + (params.get('as') ? `&as=${encodeURIComponent(params.get('as'))}` : '');
+
+    /* ---------- Permissions (same rules as the board) ---------- */
+    const byEmail = (e) => members.find((m) => m.email === e);
+    const role = () => byEmail(VIEWER).role;
+    // Admins, and the PM who owns the project, manage it (edit, delete, members, lead). The lead is a Dev who runs the board.
+    const manage = () => role() === 'admin' || (role() === 'pm' && project.owner === VIEWER);
+    const access = () => !project ? 'missing' : role() === 'hr' ? 'hr' : (role() === 'admin' || project.members.includes(VIEWER)) ? 'ok' : 'denied';
+
+    /* ---------- Helpers ---------- */
+    const $ = (s) => document.querySelector(s);
+    const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const initials = (n) => n.trim().split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+    const pad = (n) => String(n).padStart(2, '0');
+    const TINTS = ['#DDE2FF', '#FFE79A', '#C9F0DE', '#FAD4D4', '#E0D8FA'];
+    const tint = (s) => TINTS[[...s].reduce((a, c) => a + c.charCodeAt(0), 0) % TINTS.length];
+    const avatar = (name, size = 'h-9 w-9 text-xs', extra = '') => `<span class="flex ${size} shrink-0 items-center justify-center font-bold text-ink ${extra}" style="background:${tint(name)}">${esc(initials(name))}</span>`;
+    const badge = (r) => `<span class="inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${ROLES[r].cls}">${ROLES[r].label}</span>`;
+    const BTN = 'bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark';
+    const LOCK = '<svg class="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M6 11h12v9H6zM9 11V7a3 3 0 016 0v4"/></svg>';
+    const ICON = (d) => `<svg class="h-[18px] w-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true">${d}</svg>`;
+    const ICONS = {
+      org: ICON('<path d="M4 21V4h10v17M14 9h6v12M3 21h18M8 8h2M8 12h2M8 16h2"/>'),
+      projects: ICON('<path d="M3 5h7l2 2h9v13H3z"/>'),
+      tasks: ICON('<path d="M4 4h16v16H4zM8 12l3 3 5-6"/>'),
+    };
+
+    const INPUT = 'w-full border border-ink/40 bg-white px-3.5 py-2.5 text-[15px] text-ink placeholder:text-ink-soft/60 outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25';
+    const COLORS = ['#1F2FE0', '#FFD83D', '#E5484D', '#2FB67C', '#14183A'];
+
+    let toastTimer;
+    function toast(msg) {
+      const t = $('#toast'); t.textContent = msg;
+      t.classList.remove('opacity-0', 'translate-y-2');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.add('opacity-0', 'translate-y-2'), 2400);
+    }
+    function ask({ title, body, ok, danger = false, validate = () => '' }) {
+      return new Promise((resolve) => {
+        const dlg = $('#dlg'), form = $('#dlg-form'), err = $('#dlg-err'), btn = $('#dlg-ok');
+        $('#dlg-title').textContent = title;
+        $('#dlg-body').innerHTML = body;
+        btn.textContent = ok;
+        btn.className = `px-4 py-2 text-sm font-semibold text-white ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-cobalt hover:bg-cobalt-dark'}`;
+        err.classList.add('hidden');
+        const done = (val) => { form.onsubmit = null; $('#dlg-cancel').onclick = null; dlg.onclose = null; if (dlg.open) dlg.close(); resolve(val); };
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          const data = new FormData(form), msg = validate(data);
+          if (msg) { err.textContent = msg; err.classList.remove('hidden'); return; }
+          done(data);
+        };
+        $('#dlg-cancel').onclick = () => done(null);
+        dlg.onclose = () => done(null);
+        dlg.showModal();
+        const first = $('#dlg-body input'); if (first) first.focus();
+      });
+    }
+
+    /* ---------- Chrome ---------- */
+    function renderChrome() {
+      const me = byEmail(VIEWER);
+      $('#org-block').innerHTML = `<span class="flex h-7 w-7 items-center justify-center bg-sun text-xs font-bold text-ink">${esc(initials(ORG.name))}</span><span class="min-w-0 flex-1 truncate font-semibold">${esc(ORG.name)}</span>`;
+      $('#nav').innerHTML =
+        `<a href="dashboard.html" class="flex items-center gap-3 px-3 py-2.5 text-ink-soft hover:bg-paper hover:text-ink">${ICONS.org}Organization</a>
+         <a href="projects.html" aria-current="page" class="flex items-center gap-3 bg-cobalt px-3 py-2.5 font-semibold text-white">${ICONS.projects}Projects</a>
+         <span class="flex items-center gap-3 px-3 py-2.5 text-ink-soft" title="Coming soon">${ICONS.tasks}My tasks<span class="ml-auto border border-ink-line px-1.5 text-[10px] font-bold uppercase tracking-wider">Soon</span></span>`;
+      $('#me').innerHTML = `${avatar(me.name)}<div class="min-w-0 text-sm"><p class="truncate font-semibold">${esc(me.name)}</p><p class="truncate text-xs text-ink-soft">${ROLES[me.role].label}</p></div>`;
+      $('#crumb').innerHTML = `<a href="projects.html" class="hover:text-ink">${esc(ORG.name)} / Projects</a> <span class="mx-1.5 text-ink-line">/</span> ${project ? `<a href="${link('project.html')}" class="hover:text-ink">${esc(project.name)}</a> <span class="mx-1.5 text-ink-line">/</span> <span class="font-semibold text-ink">Documents</span>` : '<span class="font-semibold text-ink">Not found</span>'}`;
+      $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    /* ---------- Documents ---------- */
+    const MAX_MB = 25;
+    const ALLOWED = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'csv', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'zip'];
+    const TYPE_COLORS = { pdf: '#E5484D', doc: '#1F2FE0', docx: '#1F2FE0', txt: '#1F2FE0', md: '#1F2FE0', xls: '#2FB67C', xlsx: '#2FB67C', csv: '#2FB67C', ppt: '#F59E0B', pptx: '#F59E0B', png: '#0EA5A5', jpg: '#0EA5A5', jpeg: '#0EA5A5', gif: '#0EA5A5', svg: '#0EA5A5', zip: '#14183A' };
+    const extOf = (n) => (n.includes('.') ? n.split('.').pop() : '').toLowerCase();
+    const fmtSize = (b) => b < 1024 ? `${b} B` : b < 1048576 ? `${Math.round(b / 1024)} KB` : `${(b / 1048576).toFixed(1)} MB`;
+    const fmtDate = (iso) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const daysAgo = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return x.toISOString(); };
+    // [name, uploaded by, size in bytes, days ago]. Sample files have no content, so Download shows a demo message.
+    const DOCS_SEED = {
+      1: [['Project brief.pdf', 'jonas@acme.com', 1258291, -12], ['Sitemap v3.xlsx', 'priya@acme.com', 348160, -6], ['Brand guidelines.pdf', 'lena@acme.com', 5033164, -4], ['Homepage wireframes.png', 'lena@acme.com', 2202009, -1]],
+      2: [['App store requirements.pdf', 'jonas@acme.com', 812000, -9]],
+      3: [],
+    };
+    let docs = project ? (DOCS_SEED[project.id] || []).map(([name, by, size, d], i) => ({ id: `seed${i}`, name, by, size, at: daysAgo(d), url: null })) : [];
+    let uploading = [];
+    const canUpload = () => role() === 'admin' || project.members.includes(VIEWER);                    // everyone on the project
+    const canDeleteDoc = (d) => manage() || project.lead === VIEWER || d.by === VIEWER;                // owner, lead, admin, or whoever uploaded it
+    const typeBadge = (n) => `<span class="flex h-10 w-10 shrink-0 items-center justify-center text-[10px] font-bold uppercase text-white" style="background:${TYPE_COLORS[extOf(n)] || '#8A90AD'}">${esc(extOf(n).slice(0, 4) || 'file')}</span>`;
+
+    let docQuery = '';
+    const shownDocs = () => { const q = docQuery.trim().toLowerCase(); return q ? docs.filter((d) => d.name.toLowerCase().includes(q)) : docs; };
+    const foundText = () => docQuery.trim() ? `${shownDocs().length} of ${docs.length} match` : '';
+    const hl = (name) => {   // highlight the first match inside a file name
+      const q = docQuery.trim(), i = q ? name.toLowerCase().indexOf(q.toLowerCase()) : -1;
+      return i < 0 ? esc(name) : `${esc(name.slice(0, i))}<mark class="bg-sun text-ink">${esc(name.slice(i, i + q.length))}</mark>${esc(name.slice(i + q.length))}`;
+    };
+
+    function docsBody() {
+      const up = canUpload(), empty = docs.length === 0 && uploading.length === 0;
+      if (empty && !up) return '<p class="border border-dashed border-ink-line p-8 text-center text-sm text-ink-soft">No documents yet. People on the project can upload them here.</p>';
+      const zone = up ? `<div id="dropzone" tabindex="0" role="button" aria-label="Upload documents. Drop files here, or press Enter to choose files." class="flex cursor-pointer flex-col items-center justify-center gap-1 border-2 border-dashed border-ink-soft/40 px-6 text-center transition-colors hover:border-cobalt hover:bg-paper focus-visible:border-cobalt focus-visible:outline-none ${empty ? 'py-12' : 'py-5'}">
+          <svg class="h-7 w-7 text-ink-soft" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="square" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+          <p class="font-semibold">${empty ? 'No documents yet. ' : ''}Drop files here or <span class="text-cobalt underline underline-offset-2">choose files</span></p>
+          <p class="text-xs text-ink-soft">PDF, Office files, images, CSV or ZIP. Up to ${MAX_MB} MB each.</p></div>` : '';
+      const COLS = 'sm:grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px]';
+      const uploadingRows = uploading.map((u) => `<li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 border-b border-ink-line px-4 py-3">
+          <div class="flex min-w-0 items-center gap-3">${typeBadge(u.name)}<div class="min-w-0 flex-1"><p class="truncate font-semibold">${esc(u.name)}</p>
+            <div class="mt-1.5 h-1.5 w-full max-w-xs bg-paper" role="progressbar" aria-valuenow="${Math.round(u.progress)}" aria-valuemin="0" aria-valuemax="100"><div class="h-full bg-cobalt" style="width:${u.progress}%"></div></div></div></div>
+          <span class="text-sm text-ink-soft">${Math.round(u.progress)}%</span></li>`).join('');
+      const noMatch = docs.length > 0 && shownDocs().length === 0 && uploading.length === 0;
+      const docRows = shownDocs().map((d) => {
+        const by = byEmail(d.by);
+        return `<li class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 hover:bg-paper/70 ${COLS}">
+          <div class="flex min-w-0 items-center gap-3">${typeBadge(d.name)}<div class="min-w-0"><p class="truncate font-semibold">${hl(d.name)}</p><p class="truncate text-xs text-ink-soft sm:hidden">${fmtSize(d.size)} · ${esc(by ? by.name : 'Unknown')} · ${fmtDate(d.at)}</p></div></div>
+          <div class="hidden min-w-0 items-center gap-2 text-sm sm:flex">${by ? avatar(by.name, 'h-6 w-6 text-[9px]') : ''}<span class="truncate">${esc(by ? by.name : 'Unknown')}</span></div>
+          <span class="hidden text-sm text-ink-soft sm:block">${fmtDate(d.at)}</span>
+          <span class="hidden text-sm text-ink-soft sm:block">${fmtSize(d.size)}</span>
+          <div class="flex items-center justify-end gap-4 text-sm"><button type="button" data-action="download" data-id="${esc(d.id)}" class="font-semibold text-cobalt underline-offset-2 hover:underline">Download</button>${canDeleteDoc(d) ? `<button type="button" data-action="delete-doc" data-id="${esc(d.id)}" class="text-ink-soft underline-offset-2 hover:text-red-600 hover:underline">Delete</button>` : ''}</div>
+        </li>`;
+      }).join('');
+      const table = noMatch ? `<p class="${up ? 'mt-3 ' : ''}border border-dashed border-ink-line p-8 text-center text-sm text-ink-soft">No documents match “${esc(docQuery.trim())}”. <button type="button" data-action="clear-search" class="font-semibold text-cobalt underline-offset-2 hover:underline">Clear search</button></p>` : (docs.length || uploading.length) ? `<div class="${up ? 'mt-3 ' : ''}border border-ink">
+          <div class="hidden grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px] gap-x-4 border-b border-ink bg-paper px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft sm:grid"><span>Name</span><span>Uploaded by</span><span>Date</span><span>Size</span><span></span></div>
+          <ul>${uploadingRows}${docRows}</ul></div>` : '';
+      return zone + table;
+    }
+    function docsSection() {
+      return `<section id="documents" class="mt-10 scroll-mt-20" aria-labelledby="h-docs">
+        <div class="mb-1 flex items-end justify-between gap-3">
+          <h2 id="h-docs" class="font-display text-2xl font-bold tracking-tight">Documents <span id="docs-count" class="ml-1 align-middle font-sans text-sm font-bold text-ink-soft">${pad(docs.length)}</span></h2>
+          ${canUpload() ? `<button type="button" data-action="upload" class="${BTN}">Upload files</button>` : ''}
+        </div>
+        <p class="mb-3 text-sm text-ink-soft">Shared with everyone on this project. Members can upload. The owner, the lead and whoever uploaded a file can delete it.</p>
+        <div id="doc-search-row" class="mb-3 flex flex-wrap items-center gap-3 ${docs.length ? '' : 'hidden'}">
+          <input id="doc-search" type="search" value="${esc(docQuery)}" placeholder="Search documents by name" aria-label="Search documents by name" autocomplete="off" class="w-full max-w-xs border border-ink/40 bg-white px-3.5 py-2 text-[15px] outline-none transition focus:border-cobalt focus:ring-2 focus:ring-cobalt/25">
+          <span id="docs-found" class="text-sm text-ink-soft" aria-live="polite">${foundText()}</span>
+        </div>
+        <input type="file" id="file-input" multiple tabindex="-1" class="sr-only" accept="${ALLOWED.map((e) => '.' + e).join(',')}">
+        <div id="docs-body">${docsBody()}</div></section>`;
+    }
+    function renderDocs() {
+      const b = $('#docs-body'); if (b) b.innerHTML = docsBody();
+      const c = $('#docs-count'); if (c) c.textContent = pad(docs.length);
+      const f = $('#docs-found'); if (f) f.textContent = foundText();
+      $('#doc-search-row')?.classList.toggle('hidden', docs.length === 0);
+      const nav = document.querySelector('nav[aria-label="Project sections"]'); if (nav) nav.outerHTML = tabs('documents', { docs: docs.length });   // keep the tab badge in step
+    }
+    function addFiles(list) {
+      if (docQuery) { docQuery = ''; const i = $('#doc-search'); if (i) i.value = ''; }
+      const files = [...list], skipped = [];
+      files.forEach((f, i) => {
+        const ext = extOf(f.name);
+        if (!ALLOWED.includes(ext)) return skipped.push(`${f.name}: .${ext || 'unknown'} files aren't supported`);
+        if (f.size > MAX_MB * 1048576) return skipped.push(`${f.name}: larger than ${MAX_MB} MB`);
+        const u = { id: `u${Date.now()}${i}`, name: f.name, size: f.size, progress: 0 };
+        uploading.push(u);
+        const timer = setInterval(() => {   // demo progress. Replace with a real upload that reports progress.
+          u.progress = Math.min(100, u.progress + 12 + Math.random() * 18);
+          if (u.progress >= 100) {
+            clearInterval(timer);
+            uploading = uploading.filter((x) => x !== u);
+            docs.unshift({ id: u.id, name: f.name, by: VIEWER, size: f.size, at: new Date().toISOString(), url: URL.createObjectURL(f) });   // TODO: POST the file to storage, then save its record
+          }
+          renderDocs();
+        }, 120);
+      });
+      renderDocs();
+      if (skipped.length) toast(skipped[0] + (skipped.length > 1 ? ` (and ${skipped.length - 1} more skipped)` : ''));
+    }
+
+    /* ---------- Project tabs (the same bar sits on all three project pages) ---------- */
+    const NAV_COUNTS = { tasks: { 1: 12, 2: 4, 3: 3 }, docs: { 1: 4, 2: 1, 3: 0 } };   // demo numbers; the page you are on passes its live count
+    function tabs(active, counts = {}) {
+      const n = { tasks: NAV_COUNTS.tasks[project.id], docs: NAV_COUNTS.docs[project.id], ...counts };
+      const item = (k, label, page, count) => `<a href="${link(page)}" ${active === k ? 'aria-current="page"' : ''} class="-mb-px flex shrink-0 items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-semibold ${active === k ? 'border-cobalt text-ink' : 'border-transparent text-ink-soft hover:text-ink'}">${label}${count != null ? `<span class="bg-paper px-1.5 text-xs font-bold text-ink-soft">${count}</span>` : ''}</a>`;
+      return `<nav class="mt-5 flex overflow-x-auto border-b border-ink-line" aria-label="Project sections">${item('overview', 'Overview', 'project.html')}${item('board', 'Board', 'project-board.html', n.tasks)}${item('documents', 'Documents', 'project-documents.html', n.docs)}</nav>`;
+    }
+
+    /* ---------- Page ---------- */
+    function render() {
+      renderChrome();
+      const v = $('#view'), a = access();
+      document.title = project ? `${project.name} documents · Nexus` : 'Documents · Nexus';
+      if (a !== 'ok') {
+        const msg = { missing: ['Project not found', "This project doesn't exist, or it was deleted."], hr: ["Projects aren't part of the HR role", 'HR looks after the people in the organization. Project work is handled by PMs, Admins and Devs.'], denied: ["You're not on this project", 'Ask the project owner to add you, and it will show up in your Projects list.'] }[a];
+        v.innerHTML = `<div class="max-w-2xl border border-ink p-8 sm:p-10"><span class="flex h-12 w-12 items-center justify-center bg-paper text-ink-soft">${LOCK}</span>
+          <h1 class="mt-5 font-display text-3xl font-bold leading-tight tracking-tight">${msg[0]}</h1><p class="mt-3 max-w-md text-sm text-ink-soft">${msg[1]}</p>
+          <a href="${a === 'hr' ? 'dashboard.html' : 'projects.html'}" class="mt-6 inline-block ${BTN}">${a === 'hr' ? 'Go to Organization' : 'Back to Projects'}</a></div>`;
+        return;
+      }
+      v.innerHTML = `
+        <div class="border border-ink p-6 pl-7 sm:p-8 sm:pl-9" style="box-shadow: inset 6px 0 0 ${project.color}">
+          <a href="projects.html" class="text-sm text-ink-soft hover:text-ink">← All projects</a>
+          <h1 class="mt-2 font-display text-3xl font-bold leading-none tracking-tight">${esc(project.name)}</h1>
+          ${project.description ? `<p class="mt-2 max-w-2xl text-sm text-ink-soft">${esc(project.description)}</p>` : ''}
+        </div>
+        ${tabs('documents', { docs: docs.length })}
+        ${docsSection()}`;
+      v.classList.remove('view-in'); void v.offsetWidth; v.classList.add('view-in');
+    }
+
+    const actions = {
+      upload() { $('#file-input').click(); },
+      'clear-search'() { docQuery = ''; const i = $('#doc-search'); if (i) { i.value = ''; i.focus(); } renderDocs(); },
+      download({ id }) {
+        const d = docs.find((x) => x.id === id); if (!d) return;
+        if (!d.url) return toast('Sample document: there is nothing to download in the demo');
+        const a = document.createElement('a'); a.href = d.url; a.download = d.name; document.body.appendChild(a); a.click(); a.remove();
+      },
+      async 'delete-doc'({ id }) {
+        const d = docs.find((x) => x.id === id); if (!d) return;
+        const ok = await ask({ title: 'Delete this document?', ok: 'Delete document', danger: true, body: `<p><strong class="text-ink">${esc(d.name)}</strong> will be removed for everyone on the project. This can't be undone.</p>` });
+        if (!ok) return;
+        if (d.url) URL.revokeObjectURL(d.url);
+        docs = docs.filter((x) => x !== d); render(); toast('Document deleted');   // TODO: DELETE /projects/:id/documents/:docId
+      },
+    };
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('[data-action]');
+      if (el) return actions[el.dataset.action]?.(el.dataset);
+      if (e.target.closest('#dropzone')) $('#file-input').click();
+    });
+    document.addEventListener('input', (e) => { if (e.target.id === 'doc-search') { docQuery = e.target.value; renderDocs(); } });
+    document.addEventListener('change', (e) => { if (e.target.id === 'file-input') { addFiles(e.target.files); e.target.value = ''; } });
+    document.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target.id === 'dropzone') { e.preventDefault(); $('#file-input').click(); } });
+    document.addEventListener('dragover', (e) => { const z = e.target.closest?.('#dropzone'); if (z) { e.preventDefault(); z.classList.add('border-cobalt', 'bg-paper'); } });
+    document.addEventListener('dragleave', (e) => { const z = e.target.closest?.('#dropzone'); if (z && !z.contains(e.relatedTarget)) z.classList.remove('border-cobalt', 'bg-paper'); });
+    document.addEventListener('drop', (e) => { const z = e.target.closest?.('#dropzone'); if (!z) return; e.preventDefault(); z.classList.remove('border-cobalt', 'bg-paper'); addFiles(e.dataTransfer.files); });
+
+    $('#menu-btn').addEventListener('click', () => {
+      const open = $('#sidebar').classList.toggle('hidden') === false;
+      $('#sidebar').classList.toggle('flex', open);
+      $('#menu-btn').setAttribute('aria-expanded', String(open));
+    });
+
+    render();
+  </script>
+</body>
+</html>

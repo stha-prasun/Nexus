@@ -4,6 +4,7 @@ import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { ManageMembersDialog } from '@/components/dashboard/ManageMembersDialog';
 import { ProjectMemberTable } from '@/components/dashboard/ProjectMemberTable';
+import { ProjectTabs } from '@/components/dashboard/ProjectTabs';
 import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import {
@@ -557,7 +558,12 @@ export function ProjectDetailPage() {
             <Stat label="Your access" value={accessLabel} />
           </dl>
         </div>
-        <p className="mt-4 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
+        <ProjectTabs
+          projectId={project.id}
+          active="overview"
+          taskCount={TASK_TOTAL}
+        />
+        <p className="mt-5 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
           {note}
         </p>
         {canManage && leads.length === 0 ? (

@@ -10,6 +10,7 @@ import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { ProjectBoardPage } from '@/pages/ProjectBoardPage';
 import { ProjectDetailPage } from '@/pages/ProjectDetailPage';
+import { ProjectDocumentsPage } from '@/pages/ProjectDocumentsPage';
 import { ProjectsPage } from '@/pages/ProjectsPage';
 import { SignupPage } from '@/pages/SignupPage';
 import { VerifyEmailPage } from '@/pages/VerifyEmailPage';
@@ -71,6 +72,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <ProjectBoardPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'dashboard/projects/:id/documents',
+        element: (
+          <RequireAuth>
+            <ProjectDocumentsPage />
           </RequireAuth>
         ),
       },

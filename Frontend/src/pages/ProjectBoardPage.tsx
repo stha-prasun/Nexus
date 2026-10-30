@@ -13,6 +13,7 @@ import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { LockIcon } from '@/components/dashboard/Icons';
 import { Avatar, RoleBadge } from '@/components/dashboard/OrgView';
+import { ProjectTabs } from '@/components/dashboard/ProjectTabs';
 import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
 import { logout, type Project, type ProjectMember, type User } from '@/lib/api';
@@ -1111,7 +1112,13 @@ export function ProjectBoardPage() {
           ) : null}
         </div>
 
-        <div className="mt-5 flex flex-wrap items-center gap-3">
+        <ProjectTabs
+          projectId={project.id}
+          active="board"
+          taskCount={tasks.length}
+        />
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
           <input
             type="search"
             placeholder="Search tasks"
