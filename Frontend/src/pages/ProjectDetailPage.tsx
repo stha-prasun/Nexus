@@ -714,6 +714,7 @@ export function ProjectDetailPage() {
 
   return (
     <AppShell
+      wide
       org={org}
       user={{
         name: authUser?.name ?? CURRENT_USER.name,
