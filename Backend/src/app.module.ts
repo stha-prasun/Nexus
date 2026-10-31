@@ -7,6 +7,7 @@ import { HealthModule } from './module/health/health.module';
 import { MembersModule } from './module/members/api/members.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
 import { ProjectsModule } from './module/projects/api/projects.module';
+import { TasksModule } from './tasks/tasks.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ProjectsModule } from './module/projects/api/projects.module';
     OrganizationModule,
     MembersModule,
     ProjectsModule,
+    TasksModule,
   ],
   providers: [
     // Enforces ThrottlerModule limits + every @Throttle override (register
