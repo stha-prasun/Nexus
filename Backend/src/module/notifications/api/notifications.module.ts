@@ -26,9 +26,13 @@ import { NotificationEmitterService } from './sse/notification-emitter.service';
     NotificationEmitterService,
   ],
   // TasksModule consumes the service (assignment + reminder writes), the
-  // factory (row construction) and the emitter (publish after commit).
+  // factory (row construction) and the emitter (publish after commit), plus
+  // the repository — TasksRepository inserts its notification row *inside*
+  // the task mutation's own transaction (tx-aware `insert(row, tx)`), which
+  // is what keeps "task changed" and "notification exists" atomic (plan §5).
   exports: [
     NotificationsService,
+    NotificationsRepository,
     NotificationFactory,
     NotificationEmitterService,
   ],
