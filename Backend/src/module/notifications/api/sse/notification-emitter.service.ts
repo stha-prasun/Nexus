@@ -8,7 +8,10 @@ import {
 import type { Redis } from 'ioredis';
 import { interval, Observable, Subject, type Subscription } from 'rxjs';
 import { AppLogger } from '../../../../common/logger/logger';
-import type { SessionService } from '../../../auth/api/session/session.service';
+// Value import, NOT `import type`: `emitDecoratorMetadata` needs the runtime
+// class reference for the constructor's design:paramtypes — a type-only import
+// is erased and Nest would see `Function` at DI time (unresolvable dependency).
+import { SessionService } from '../../../auth/api/session/session.service';
 import { REDIS_CLIENT } from '../../../redis/constants/redis.constants';
 import {
   NOTIFICATION_EVENT,
