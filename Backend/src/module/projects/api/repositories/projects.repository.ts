@@ -7,6 +7,7 @@ import {
   organizationMembers,
   projectMembers,
   projects,
+  tasks,
   users,
 } from '../../../database/schema';
 import { projectLockKey } from '../constants/projects.constants';
@@ -271,7 +272,11 @@ export class ProjectsRepository {
   /**
    * Remove a membership inside the per-project advisory-locked transaction:
    * lock → `FOR UPDATE` re-read → if the target is a lead, recount *other*
-   * leads (0 → rollback via LastLeadError) → delete. The org-role checks
+   * leads (0 → rollback via LastLeadError) → delete → **unassign their
+   * tasks in the same transaction** (plan §8.3 project path: a removed
+   * member must not keep `assigneeId`, or they would keep receiving
+   * reminders for a task they can now only 404 on). Shared-schema Drizzle
+   * update — no TasksModule import, no cycle. The org-role checks
    * (self, PM-target) happen in the service before this call.
    */
   async removeMember(
@@ -302,6 +307,14 @@ export class ProjectsRepository {
           if (others === 0) throw new LastLeadError();
         }
         await tx.delete(projectMembers).where(eq(projectMembers.id, row.id));
+        // Scope: this project only (the org path covers the wider case).
+        // $onUpdate stamps updated_at automatically.
+        await tx
+          .update(tasks)
+          .set({ assigneeId: null })
+          .where(
+            and(eq(tasks.projectId, projectId), eq(tasks.assigneeId, userId)),
+          );
         return { outcome: 'removed' as const };
       });
     } catch (error) {

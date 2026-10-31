@@ -1,5 +1,6 @@
 import { Module, ValidationPipe } from '@nestjs/common';
 import { APP_GUARD, APP_PIPE } from '@nestjs/core';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CommonModule } from './common/common.module';
 import { AuthModule } from './module/auth/api/auth.module';
@@ -7,7 +8,7 @@ import { HealthModule } from './module/health/health.module';
 import { MembersModule } from './module/members/api/members.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
 import { ProjectsModule } from './module/projects/api/projects.module';
-import { TasksModule } from './tasks/tasks.module';
+import { TasksModule } from './module/tasks/api/tasks.module';
 
 @Module({
   imports: [
@@ -16,6 +17,8 @@ import { TasksModule } from './tasks/tasks.module';
     AuthModule,
     // Global abuse control (per-IP); register/resend tighten further via @Throttle.
     ThrottlerModule.forRoot([{ name: 'default', limit: 100, ttl: 60_000 }]),
+    // Cron transport for the tasks due-date reminder sweep (§8.4).
+    ScheduleModule.forRoot(),
     OrganizationModule,
     MembersModule,
     ProjectsModule,

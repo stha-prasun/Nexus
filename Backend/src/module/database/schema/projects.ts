@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   check,
   index,
+  integer,
   pgTable,
   timestamp,
   uuid,
@@ -35,6 +36,14 @@ export const projects = pgTable(
     createdByUserId: uuid('created_by_user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
+    /**
+     * Monotonic source for `tasks.seq` (plan §8.2): incremented under the
+     * per-project advisory lock and never decremented, so deleting the
+     * highest task can never reissue its key while external references
+     * (notification snapshots, copied links) still point at it. Gaps from
+     * deleted tasks are correct by design.
+     */
+    taskCounter: integer('task_counter').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

@@ -8,6 +8,7 @@ import {
   organizationMembers,
   organizations,
   projectMembers,
+  tasks,
   users,
 } from '../../../database/schema';
 import { projectLockKey } from '../../../projects/api/constants/projects.constants';
@@ -412,6 +413,20 @@ export class MembersRepository {
         await tx
           .delete(organizationMembers)
           .where(eq(organizationMembers.id, membershipId));
+
+        if (row.userId !== null) {
+          // Unassign across **all** their projects in one statement
+          // (singleton org — plan §8.3 org path). The membership delete
+          // above already cascaded their `project_members` rows; this must
+          // land in the same transaction so a rolled-back removal never
+          // strips assignments. Shared-schema Drizzle update — no
+          // TasksModule import (Tasks → Members for the guard would cycle).
+          // INVITED rows may carry a null user_id → nothing to unassign.
+          await tx
+            .update(tasks)
+            .set({ assigneeId: null })
+            .where(eq(tasks.assigneeId, row.userId));
+        }
 
         if (row.status === 'ACTIVE') {
           // CHECK guarantees user_id is set on ACTIVE rows.
