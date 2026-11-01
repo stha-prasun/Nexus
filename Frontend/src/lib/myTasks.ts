@@ -1,15 +1,18 @@
-import type { Project, TaskPriority } from '@/lib/api';
-import { dayStr, keyPrefix, type StatusKey } from '@/lib/board';
+import {
+  listProjectTasks,
+  type Project,
+  type Task,
+  type TaskPriority,
+} from '@/lib/api';
+import { dayStr, fromApiStatus, type StatusKey } from '@/lib/board';
 
-/** My-tasks domain — task shapes, the demo seed and grouping (my-tasks.html). */
+/** My-tasks domain — task shapes, the API mapping and grouping. */
 
-/** A project the seeded tasks hang off — real (Redux) or demo fallback. */
+/** A project the tasks hang off — always a real store project now. */
 export interface TaskProject {
   id: string;
   name: string;
   color: string;
-  /** Demo-fallback rows link to the projects list, not a (missing) board. */
-  real: boolean;
 }
 
 export interface MyTask {
@@ -18,7 +21,7 @@ export interface MyTask {
   title: string;
   status: StatusKey;
   priority: TaskPriority;
-  /** YYYY-MM-DD — every seeded task has a due date. */
+  /** YYYY-MM-DD — '' when the API task has no due date. */
   due: string;
   /** TaskProject.id. */
   project: string;
@@ -44,84 +47,36 @@ export const PRIORITIES: Record<
   low: { label: 'Low', color: '#8A90AD', rank: 3 },
 };
 
-/** [title, status, priority, due offset in days]. */
-type SeedRow = [string, StatusKey, TaskPriority, number];
+/** API task → MyTask — the due date is optional (`''` = none). */
+export const fromApiMyTask = (task: Task): MyTask => ({
+  id: task.id,
+  key: task.key,
+  title: task.title,
+  status: fromApiStatus(task.status),
+  priority: task.priority,
+  due: task.dueDate ?? '',
+  project: task.projectId,
+  prev: null,
+});
 
 /**
- * The design's three seed groups (my-tasks.html), dealt round-robin across
- * whichever projects exist — so one project gets group 1, two get 1+2, five
- * cycle back to group 1. Every row is assigned to "you"; the prototype's
- * assignee filter is gone with the `?as=` viewer.
+ * "My tasks" as one list: the API only serves tasks per project, so this
+ * fans out one board fetch per visible project (Admin sees every project,
+ * PM/Dev only their memberships — the server already decided that list),
+ * then keeps the rows assigned to `userId`. Small-roster scale (plan §1):
+ * no pagination, `Promise.all` fails the whole load into one error state.
  */
-const SEED_GROUPS: SeedRow[][] = [
-  [
-    ['Finalize homepage copy', 'done', 'medium', -6],
-    ['Export brand assets', 'done', 'low', -5],
-    ['Set up analytics', 'resolved', 'medium', -2],
-    ['Update API docs', 'testing', 'high', 1],
-    ['Fix checkout timeout', 'review', 'urgent', 0],
-    ['Write release notes', 'review', 'low', 3],
-    ['Review mobile layout', 'progress', 'high', 1],
-    ['Hero animation', 'progress', 'medium', 4],
-    ['Waiting on legal for cookie banner', 'hold', 'medium', -1],
-    ['Migrate blog posts', 'todo', 'medium', 7],
-    ['Audit accessibility', 'todo', 'high', 6],
-    ['Set up staging redirects', 'todo', 'low', 9],
-  ],
-  [
-    ['Push notifications', 'progress', 'high', 2],
-    ['Onboarding flow', 'review', 'medium', 1],
-    ['App store listing', 'todo', 'low', 12],
-    ['Crash reporting', 'done', 'medium', -3],
-  ],
-  [
-    ['Logo shortlist', 'review', 'high', 0],
-    ['Color palette', 'progress', 'medium', 3],
-    ['Type specimen', 'todo', 'low', 8],
-  ],
-];
-
-/** Stand-ins when the store has no projects — the page always has content. */
-const DEMO_PROJECTS: TaskProject[] = [
-  { id: 'demo-1', name: 'Website relaunch', color: '#FFD83D', real: false },
-  { id: 'demo-2', name: 'Mobile app', color: '#2FB67C', real: false },
-  { id: 'demo-3', name: 'Brand refresh', color: '#E5484D', real: false },
-];
-
-/**
- * Demo tasks for the signed-in user — frontend-only until `GET /me/tasks`
- * exists. Real projects seed first; an empty store falls back to the design's
- * three demo projects so the list and calendar always render.
- */
-export function seedMyTasks(projects: Project[]): {
-  projects: TaskProject[];
-  tasks: MyTask[];
-} {
-  const real: TaskProject[] = projects.map((project) => ({
-    id: project.id,
-    name: project.name,
-    color: project.color,
-    real: true,
-  }));
-  const list = real.length > 0 ? real : DEMO_PROJECTS;
-  const tasks: MyTask[] = [];
-  list.forEach((project, index) => {
-    const rows = SEED_GROUPS[index % SEED_GROUPS.length] ?? SEED_GROUPS[0];
-    const prefix = keyPrefix(project.name);
-    rows.forEach(([title, status, priority, offset], row) => {
-      tasks.push({
-        id: `${project.id}-${row}`,
-        key: `${prefix}-${row + 1}`,
-        title,
-        status,
-        priority,
-        due: dayStr(offset),
-        project: project.id,
-        prev: null,
-      });
-    });
-  });
-  return { projects: list, tasks };
+export async function fetchMyTasks(
+  projects: Project[],
+  userId: string,
+): Promise<MyTask[]> {
+  const lists = await Promise.all(
+    projects.map((project) => listProjectTasks(project.id)),
+  );
+  return lists
+    .flatMap(({ tasks }) => tasks)
+    .filter((task) => task.assignee?.id === userId)
+    .map(fromApiMyTask);
 }
 
 export const isFinished = (status: StatusKey): boolean =>
@@ -148,6 +103,7 @@ export type GroupBy = 'due' | 'project';
 /**
  * Due-date buckets (overdue → completed) or one group per project — the
  * prototype's groupsOf, minus the empty-bucket filter the caller applies.
+ * Undated tasks sort last and land in "Later" (their `daysTo` is NaN).
  */
 export function groupTasks(
   list: MyTask[],
@@ -190,12 +146,18 @@ export const countOpen = (tasks: MyTask[]): number =>
   tasks.filter((task) => !isFinished(task.status)).length;
 
 /**
- * Live open-count shared with the sidebar: the page publishes after every
- * local change, and `null` on unmount so the badge falls back to the seed
- * count computed from the store. Tiny external store — the page's task list
- * stays local state until `GET /me/tasks` gives it one real source.
+ * Live open-count shared with the sidebar badge: the My-tasks page
+ * publishes after every load and local change, and the sidebar fetches it
+ * once itself when nothing has published for the signed-in user yet. Keyed
+ * by user so a re-login as someone else never shows the previous user's
+ * number — `null` means "unknown", and the badge simply stays hidden.
  */
-let publishedOpen: number | null = null;
+export interface OpenCount {
+  count: number;
+  userId: string;
+}
+
+let published: OpenCount | null = null;
 const openListeners = new Set<() => void>();
 
 export const subscribeOpenCount = (listener: () => void): (() => void) => {
@@ -205,11 +167,13 @@ export const subscribeOpenCount = (listener: () => void): (() => void) => {
   };
 };
 
-export const getOpenCount = (): number | null => publishedOpen;
+export const getOpenCount = (): OpenCount | null => published;
 
-export const publishOpenCount = (count: number | null): void => {
-  if (count === publishedOpen) return;
-  publishedOpen = count;
+export const publishOpenCount = (count: number, userId: string): void => {
+  if (published && published.count === count && published.userId === userId) {
+    return;
+  }
+  published = { count, userId };
   openListeners.forEach((listener) => {
     listener();
   });

@@ -12,13 +12,15 @@ import { AppShell } from '@/components/dashboard/AppShell';
 import { LockIcon } from '@/components/dashboard/Icons';
 import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
-import { logout } from '@/lib/api';
+import { ApiError, changeTaskStatus, logout } from '@/lib/api';
 import {
   dayStr,
   dueChip,
+  fromApiStatus,
   STATUSES,
   type StatusKey,
   statusLabel,
+  toApiStatus,
 } from '@/lib/board';
 import {
   BTN,
@@ -31,13 +33,13 @@ import {
 import {
   countOpen,
   daysTo,
+  fetchMyTasks,
   type GroupBy,
   groupTasks,
   isFinished,
   type MyTask,
   PRIORITIES,
   publishOpenCount,
-  seedMyTasks,
   sortTasks,
   type TaskProject,
 } from '@/lib/myTasks';
@@ -75,22 +77,23 @@ const ROW_SELECT =
   'border border-ink/40 bg-white px-2 py-1.5 text-sm font-medium outline-none focus:border-cobalt';
 
 const projectOf = (projects: TaskProject[], id: string): TaskProject =>
-  projects.find((project) => project.id === id) ??
-  ({
+  projects.find((project) => project.id === id) ?? {
     id,
     name: 'Unknown project',
     color: '#8A90AD',
-    real: false,
-  } as TaskProject);
+  };
 
 /** Title opens the board; the project chip opens its page (design's links). */
 const titleTo = (project: TaskProject): string =>
-  project.real
-    ? `/dashboard/projects/${project.id}/board`
-    : '/dashboard/projects';
+  `/dashboard/projects/${project.id}/board`;
 
 const projectTo = (project: TaskProject): string =>
-  project.real ? `/dashboard/projects/${project.id}` : '/dashboard/projects';
+  `/dashboard/projects/${project.id}`;
+
+const apiMessage = (error: unknown): string =>
+  error instanceof ApiError
+    ? error.messages.join(' ')
+    : "Can't reach the server. Please try again shortly.";
 
 function DueCell({ task }: { task: MyTask }) {
   if (!task.due) {
@@ -639,17 +642,23 @@ export function MyTasksPage() {
     retry: retryProjects,
   } = useProjects();
 
-  const [taskProjects, setTaskProjects] = useState<TaskProject[]>([]);
   const [tasks, setTasks] = useState<MyTask[]>([]);
-  // Frontend-only seed — one pass when the roster lands (documents-page
-  // pattern); every later change is local state, no task API calls exist.
-  const seededRef = useRef(false);
-  if (projectsStatus === 'ready' && !seededRef.current) {
-    seededRef.current = true;
-    const seed = seedMyTasks(projects);
-    setTaskProjects(seed.projects);
-    setTasks(seed.tasks);
-  }
+  const [tasksStatus, setTasksStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
+  const [tasksError, setTasksError] = useState<string[]>([]);
+  // Retry bump — increments to re-run the fetch without other deps changing.
+  const [tasksNonce, setTasksNonce] = useState(0);
+
+  const taskProjects = useMemo<TaskProject[]>(
+    () =>
+      projects.map((project) => ({
+        id: project.id,
+        name: project.name,
+        color: project.color,
+      })),
+    [projects],
+  );
 
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<TabKey>('open');
@@ -668,16 +677,50 @@ export function MyTasksPage() {
     document.title = 'My tasks · Nexus';
   }, []);
 
-  // The sidebar badge reads this; `null` (page closed) falls back to seed.
+  // The API only serves tasks per project, so the page fans out one board
+  // fetch per visible project and keeps rows assigned to me (board's load
+  // pattern: cancelled flag, 401 → anonymous, one error state with retry).
+  // HR renders the lock screen above this branch, so it never fetches.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tasksNonce is a retry bump — it must re-run the fetch without being read inside.
   useEffect(() => {
-    publishOpenCount(countOpen(tasks));
-  }, [tasks]);
-  useEffect(
-    () => () => {
-      publishOpenCount(null);
-    },
-    [],
-  );
+    if (projectsStatus !== 'ready' || authUser === null || roleKey === 'hr') {
+      return;
+    }
+    let cancelled = false;
+    setTasksStatus('loading');
+    setTasksError([]);
+    fetchMyTasks(projects, authUser.id)
+      .then((rows) => {
+        if (cancelled) return;
+        setTasks(rows);
+        setTasksStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 401) {
+          // Definitive session verdict — RequireAuth bounces to login.
+          dispatch(setAnonymous());
+          return;
+        }
+        setTasksStatus('error');
+        setTasksError(
+          error instanceof ApiError
+            ? error.messages
+            : ["Can't reach the server. Please try again shortly."],
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projects, projectsStatus, authUser, tasksNonce, dispatch]);
+
+  // The sidebar badge reads this — keyed by user, and kept after unmount so
+  // navigating away doesn't blank the count it just helped load.
+  useEffect(() => {
+    if (tasksStatus === 'ready' && authUser !== null) {
+      publishOpenCount(countOpen(tasks), authUser.id);
+    }
+  }, [tasks, tasksStatus, authUser]);
 
   const visible = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -699,32 +742,56 @@ export function MyTasksPage() {
 
   const closeDay = useCallback(() => setDay(null), []);
 
-  const handleToggle = (task: MyTask, checked: boolean): void => {
+  /**
+   * Optimistic status move: flip locally at once (the checkbox/select feel),
+   * then `PATCH /tasks/:id/status` — I'm the assignee, so the API's status
+   * rights always admit me. A failure rolls the list back and toasts, the
+   * board's moveTask pattern; the server response re-syncs on success.
+   */
+  const patchStatus = (
+    task: MyTask,
+    next: StatusKey,
+    message: string,
+  ): void => {
+    if (task.status === next) return;
+    const before = tasks;
     setTasks((previous) =>
-      previous.map((row) => {
-        if (row.id !== task.id) return row;
-        if (checked) {
-          return { ...row, prev: row.status, status: 'done' as StatusKey };
-        }
-        return {
-          ...row,
-          status:
-            row.prev && row.prev !== 'done'
-              ? row.prev
-              : ('progress' as StatusKey),
-        };
-      }),
+      previous.map((row) =>
+        row.id === task.id ? { ...row, prev: row.status, status: next } : row,
+      ),
     );
-    show(checked ? `${task.key} marked done` : `${task.key} reopened`);
+    show(message);
+    changeTaskStatus(task.id, toApiStatus(next))
+      .then(({ task: updated }) => {
+        setTasks((previous) =>
+          previous.map((row) =>
+            row.id === updated.id
+              ? { ...row, status: fromApiStatus(updated.status) }
+              : row,
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        setTasks(before);
+        show(apiMessage(error));
+      });
+  };
+
+  const handleToggle = (task: MyTask, checked: boolean): void => {
+    const next: StatusKey = checked
+      ? 'done'
+      : task.prev && task.prev !== 'done'
+        ? task.prev
+        : 'progress';
+    patchStatus(
+      task,
+      next,
+      checked ? `${task.key} marked done` : `${task.key} reopened`,
+    );
   };
 
   const handleStatus = (task: MyTask, status: StatusKey): void => {
-    setTasks((previous) =>
-      previous.map((row) =>
-        row.id === task.id ? { ...row, prev: row.status, status } : row,
-      ),
-    );
-    show(`${task.key} moved to ${statusLabel(status)}`);
+    patchStatus(task, status, `${task.key} moved to ${statusLabel(status)}`);
   };
 
   const clearFilters = (): void => {
@@ -834,6 +901,24 @@ export function MyTasksPage() {
           {projectsError.join(' ')}
         </p>
         <button type="button" onClick={retryProjects} className={BTN}>
+          Retry
+        </button>
+      </div>
+    );
+  } else if (tasksStatus === 'loading') {
+    body = <TasksSkeleton label="Loading tasks" />;
+  } else if (tasksStatus === 'error') {
+    body = (
+      <div className="flex flex-col items-center gap-4 py-24 text-center">
+        <p className="text-[15px] font-semibold text-ink">
+          Couldn&apos;t load your tasks.
+        </p>
+        <p className="max-w-sm text-sm text-ink-soft">{tasksError.join(' ')}</p>
+        <button
+          type="button"
+          onClick={() => setTasksNonce((nonce) => nonce + 1)}
+          className={BTN}
+        >
           Retry
         </button>
       </div>

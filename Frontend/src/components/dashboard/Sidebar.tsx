@@ -1,12 +1,13 @@
 import { cn } from 'cn';
-import { type ReactNode, useSyncExternalStore } from 'react';
+import { type ReactNode, useEffect, useSyncExternalStore } from 'react';
 import { NavLink } from 'react-router';
 import type { Org } from '@/lib/dashboard';
 import { initials } from '@/lib/dashboard';
 import {
   countOpen,
+  fetchMyTasks,
   getOpenCount,
-  seedMyTasks,
+  publishOpenCount,
   subscribeOpenCount,
 } from '@/lib/myTasks';
 import { useAppSelector } from '@/store/hooks';
@@ -38,12 +39,36 @@ function LockedNav({ icon, label }: { icon: ReactNode; label: string }) {
 }
 
 export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
+  const authUser = useAppSelector((state) => state.auth.user);
   const projects = useAppSelector((state) => state.projects.projects);
-  // Live count while the My-tasks page is mounted; the seed count otherwise.
-  const liveOpen = useSyncExternalStore(subscribeOpenCount, getOpenCount);
-  const openTasks = org
-    ? (liveOpen ?? countOpen(seedMyTasks(projects).tasks))
-    : 0;
+  const projectsStatus = useAppSelector((state) => state.projects.status);
+  // Live count while the My-tasks page is open; fetched once otherwise.
+  const published = useSyncExternalStore(subscribeOpenCount, getOpenCount);
+  // Only counts published for the signed-in user — a re-login as someone
+  // else must never show the previous user's badge.
+  const liveOpen =
+    published && published.userId === authUser?.id ? published.count : null;
+
+  // Real badge everywhere: when nothing has published a count for this user
+  // yet, fan out once (same call the My-tasks page makes). A failed fetch
+  // just leaves the badge hidden — no fake numbers.
+  useEffect(() => {
+    if (!org || !authUser || authUser.role === 'HR') return;
+    if (liveOpen !== null || projectsStatus !== 'ready') return;
+    let cancelled = false;
+    void fetchMyTasks(projects, authUser.id)
+      .then((rows) => {
+        if (!cancelled) publishOpenCount(countOpen(rows), authUser.id);
+      })
+      .catch(() => {
+        // Unknown stays unknown — the badge reappears on the next attempt.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [org, authUser, projects, projectsStatus, liveOpen]);
+
+  const openTasks = org && authUser?.role !== 'HR' ? liveOpen : null;
 
   return (
     <aside
@@ -151,7 +176,7 @@ export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
               <>
                 <TasksIcon />
                 My tasks
-                {openTasks > 0 ? (
+                {openTasks !== null && openTasks > 0 ? (
                   <span
                     className={cn(
                       'ml-auto px-1.5 text-xs font-bold',
