@@ -1,8 +1,15 @@
 import { cn } from 'cn';
-import type { ReactNode } from 'react';
+import { type ReactNode, useSyncExternalStore } from 'react';
 import { NavLink } from 'react-router';
 import type { Org } from '@/lib/dashboard';
 import { initials } from '@/lib/dashboard';
+import {
+  countOpen,
+  getOpenCount,
+  seedMyTasks,
+  subscribeOpenCount,
+} from '@/lib/myTasks';
+import { useAppSelector } from '@/store/hooks';
 import { LockIcon, NexusLogo, OrgIcon, ProjectsIcon, TasksIcon } from './Icons';
 import { ProfileFooter } from './ProfileFooter';
 
@@ -14,46 +21,30 @@ interface SidebarProps {
 }
 
 /**
- * My tasks isn't a page yet: padlocked with no organization ("Create an
- * organization first"), a "Soon" badge once one exists. Projects uses a real
- * NavLink instead — see below.
+ * No organization yet — My tasks is padlocked with the same copy the
+ * design's sidebar uses ("Create an organization first").
  */
-function NavPlaceholder({
-  icon,
-  label,
-  locked,
-}: {
-  icon: ReactNode;
-  label: string;
-  locked: boolean;
-}) {
-  if (locked) {
-    return (
-      <span
-        className="flex items-center gap-3 px-3 py-2.5 text-ink-soft/60"
-        title="Create an organization first"
-      >
-        {icon}
-        {label}
-        <LockIcon className="ml-auto h-3.5 w-3.5" />
-      </span>
-    );
-  }
+function LockedNav({ icon, label }: { icon: ReactNode; label: string }) {
   return (
     <span
-      className="flex items-center gap-3 px-3 py-2.5 text-ink-soft"
-      title="Coming soon"
+      className="flex items-center gap-3 px-3 py-2.5 text-ink-soft/60"
+      title="Create an organization first"
     >
       {icon}
       {label}
-      <span className="ml-auto border border-ink-line px-1.5 text-[10px] font-bold uppercase tracking-wider">
-        Soon
-      </span>
+      <LockIcon className="ml-auto h-3.5 w-3.5" />
     </span>
   );
 }
 
 export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
+  const projects = useAppSelector((state) => state.projects.projects);
+  // Live count while the My-tasks page is mounted; the seed count otherwise.
+  const liveOpen = useSyncExternalStore(subscribeOpenCount, getOpenCount);
+  const openTasks = org
+    ? (liveOpen ?? countOpen(seedMyTasks(projects).tasks))
+    : 0;
+
   return (
     <aside
       id="sidebar"
@@ -144,7 +135,40 @@ export function Sidebar({ org, user, open, onLogout }: SidebarProps) {
             <LockIcon className="ml-auto h-3.5 w-3.5" />
           </span>
         )}
-        <NavPlaceholder icon={<TasksIcon />} label="My tasks" locked={!org} />
+        {org ? (
+          <NavLink
+            to="/dashboard/tasks"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 px-3 py-2.5',
+                isActive
+                  ? 'bg-cobalt font-semibold text-white'
+                  : 'text-ink-soft hover:bg-paper',
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <TasksIcon />
+                My tasks
+                {openTasks > 0 ? (
+                  <span
+                    className={cn(
+                      'ml-auto px-1.5 text-xs font-bold',
+                      isActive
+                        ? 'bg-white text-cobalt'
+                        : 'bg-paper text-ink-soft',
+                    )}
+                  >
+                    {openTasks}
+                  </span>
+                ) : null}
+              </>
+            )}
+          </NavLink>
+        ) : (
+          <LockedNav icon={<TasksIcon />} label="My tasks" />
+        )}
       </nav>
 
       <div className="mt-auto">

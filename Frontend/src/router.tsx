@@ -6,6 +6,7 @@ import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { ConfirmSentPage } from '@/pages/ConfirmSentPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { LoginPage } from '@/pages/LoginPage';
+import { MyTasksPage } from '@/pages/MyTasksPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProfilePage } from '@/pages/ProfilePage';
 import { ProjectBoardPage } from '@/pages/ProjectBoardPage';
@@ -80,6 +81,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <ProjectDocumentsPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'dashboard/tasks',
+        element: (
+          <RequireAuth>
+            <MyTasksPage />
           </RequireAuth>
         ),
       },
