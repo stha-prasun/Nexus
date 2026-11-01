@@ -129,6 +129,23 @@ export function LockIcon({ className }: { className?: string }) {
   );
 }
 
+/** Notification bell for the TopBar's unread badge button. */
+export function BellIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className ?? 'h-[18px] w-[18px] shrink-0'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="square"
+      aria-hidden="true"
+    >
+      <path d="M6 9a6 6 0 0112 0c0 5 2 6 2 6H4s2-1 2-6M10 19a2 2 0 004 0" />
+    </svg>
+  );
+}
+
 export function NexusLogo({ className }: { className?: string }) {
   return (
     <svg

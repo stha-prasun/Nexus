@@ -11,11 +11,12 @@ import {
   ApiError,
   deleteProject,
   getProject,
+  listProjectTasks,
   logout,
   type Project,
   updateProject,
 } from '@/lib/api';
-import { STATUSES } from '@/lib/board';
+import { fromApiStatus, STATUSES, type StatusKey } from '@/lib/board';
 import { CURRENT_USER, INPUT, pad2, ROLES, toRoleKey } from '@/lib/dashboard';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
@@ -48,22 +49,6 @@ function Field({
 
 /** Fixed palette — same swatches as the design's edit dialog, all server-valid hex. */
 const COLORS = ['#1F2FE0', '#FFD83D', '#E5484D', '#2FB67C', '#14183A'];
-
-/**
- * Placeholder task counts — there is no tasks API yet, so every project
- * renders the same demo numbers (design: project.html Progress section).
- */
-const COUNTS: Record<string, number> = {
-  todo: 3,
-  progress: 2,
-  review: 2,
-  hold: 1,
-  testing: 1,
-  resolved: 1,
-  done: 2,
-};
-
-const TASK_TOTAL = STATUSES.reduce((n, s) => n + (COUNTS[s.k] ?? 0), 0);
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -175,6 +160,11 @@ export function ProjectDetailPage() {
   const [error, setError] = useState<string[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
   const [promptLead, setPromptLead] = useState(false);
+  /** Real per-status task counts — null until fetched (or after a failure). */
+  const [counts, setCounts] = useState<Record<StatusKey, number> | null>(null);
+  const [countsError, setCountsError] = useState(false);
+  /** Retry bump for the counts fetch — read outside, so it has no other use. */
+  const [countsNonce, setCountsNonce] = useState(0);
 
   /** The server's project is the source of truth — synced to the list too. */
   const adopt = useCallback(
@@ -190,6 +180,10 @@ export function ProjectDetailPage() {
     if (!id) return;
     setStatus('loading');
     setError([]);
+    // Stale counts never paint under a new project id (the loading skeleton
+    // covers the gap until the fetch below repopulates them).
+    setCounts(null);
+    setCountsError(false);
     try {
       const { project: fetched } = await getProject(id);
       adopt(fetched);
@@ -214,6 +208,43 @@ export function ProjectDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  /**
+   * Task counts for the header stat, the Board tab badge and the Progress
+   * section — one GET per project render. A failure degrades just these
+   * numbers (error + retry); it never fails the page, which already has the
+   * project itself. 401 is the definitive session verdict, as elsewhere.
+   */
+  const projectId = project?.id ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: countsNonce is a retry bump — it must re-run the fetch without being read inside.
+  useEffect(() => {
+    if (status !== 'ready' || projectId === null) return;
+    let cancelled = false;
+    setCountsError(false);
+    listProjectTasks(projectId)
+      .then(({ tasks: rows }) => {
+        if (cancelled) return;
+        const next = Object.fromEntries(
+          STATUSES.map((row) => [row.k, 0]),
+        ) as Record<StatusKey, number>;
+        for (const row of rows) {
+          const key = fromApiStatus(row.status);
+          next[key] = (next[key] ?? 0) + 1;
+        }
+        setCounts(next);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          dispatch(setAnonymous());
+          return;
+        }
+        setCountsError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, projectId, countsNonce, dispatch]);
 
   const actorRole = authUser?.role;
   const currentUserId = authUser?.id;
@@ -499,7 +530,10 @@ export function ProjectDetailPage() {
           : isLead
             ? 'You lead this project: create, edit, assign and move any task on the board. A PM or Admin manages the project itself.'
             : 'You can see every task on the board, and move the ones assigned to you.';
-    const done = COUNTS.done ?? 0;
+    const done = counts?.done ?? 0;
+    const taskTotal = counts
+      ? STATUSES.reduce((sum, row) => sum + (counts[row.k] ?? 0), 0)
+      : null;
 
     body = (
       <>
@@ -554,14 +588,19 @@ export function ProjectDetailPage() {
           <dl className="grid grid-cols-2 divide-x divide-ink-line border-t border-ink-line px-4 sm:grid-cols-4 sm:px-8">
             <Stat label="Lead" value={leadLabel} />
             <Stat label="Members" value={String(members.length)} />
-            <Stat label="Tasks" value={String(TASK_TOTAL)} />
+            <Stat
+              label="Tasks"
+              value={
+                countsError ? '—' : taskTotal === null ? '…' : String(taskTotal)
+              }
+            />
             <Stat label="Your access" value={accessLabel} />
           </dl>
         </div>
         <ProjectTabs
           projectId={project.id}
           active="overview"
-          taskCount={TASK_TOTAL}
+          taskCount={taskTotal ?? undefined}
         />
         <p className="mt-5 border-l-2 border-cobalt pl-3 text-sm text-ink-soft">
           {note}
@@ -618,41 +657,81 @@ export function ProjectDetailPage() {
               Progress
             </h2>
             <span className="text-sm text-ink-soft">
-              <strong className="text-ink">{done}</strong> of {TASK_TOTAL} done
+              {countsError ? (
+                'Task counts unavailable'
+              ) : taskTotal === null ? (
+                'Loading counts…'
+              ) : (
+                <>
+                  <strong className="text-ink">{done}</strong> of {taskTotal}{' '}
+                  done
+                </>
+              )}
             </span>
           </div>
-          <div
-            className="flex h-3 w-full bg-paper"
-            role="img"
-            aria-label={`${done} of ${TASK_TOTAL} tasks done`}
-          >
-            {STATUSES.filter((status) => COUNTS[status.k]).map((status) => (
-              <span
-                key={status.k}
-                title={`${status.label}: ${COUNTS[status.k]}`}
-                style={{
-                  width: `${((COUNTS[status.k] ?? 0) / TASK_TOTAL) * 100}%`,
-                  background: status.color,
-                }}
-              />
-            ))}
-          </div>
-          <ul className="mt-3 grid grid-cols-2 gap-px border border-ink-line bg-ink-line sm:grid-cols-4 lg:grid-cols-7">
-            {STATUSES.map((status) => (
-              <li key={status.k} className="bg-white p-3">
-                <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">
-                  <span
-                    className="h-2.5 w-2.5"
-                    style={{ background: status.color }}
-                  />
-                  {status.label}
-                </p>
-                <p className="mt-1.5 font-display text-2xl font-bold">
-                  {COUNTS[status.k] ?? 0}
-                </p>
-              </li>
-            ))}
-          </ul>
+          {countsError ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 border border-ink-line px-4 py-3">
+              <p className="text-sm text-ink-soft">
+                Couldn&apos;t load task counts.
+              </p>
+              <button
+                type="button"
+                onClick={() => setCountsNonce((value) => value + 1)}
+                className="border border-ink px-3.5 py-1.5 text-sm font-semibold hover:bg-ink hover:text-white"
+              >
+                Retry
+              </button>
+            </div>
+          ) : taskTotal === null ? (
+            <>
+              <Skeleton className="h-3 w-full" />
+              <ul className="mt-3 grid grid-cols-2 gap-px border border-ink-line bg-ink-line sm:grid-cols-4 lg:grid-cols-7">
+                {STATUSES.map((row) => (
+                  <li key={row.k} className="bg-white p-3">
+                    <Skeleton className="h-3 w-16" />
+                    <Skeleton className="mt-2 h-7 w-8" />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <>
+              <div
+                className="flex h-3 w-full bg-paper"
+                role="img"
+                aria-label={`${done} of ${taskTotal} tasks done`}
+              >
+                {STATUSES.filter((row) => (counts?.[row.k] ?? 0) > 0).map(
+                  (row) => (
+                    <span
+                      key={row.k}
+                      title={`${row.label}: ${counts?.[row.k] ?? 0}`}
+                      style={{
+                        width: `${((counts?.[row.k] ?? 0) / taskTotal) * 100}%`,
+                        background: row.color,
+                      }}
+                    />
+                  ),
+                )}
+              </div>
+              <ul className="mt-3 grid grid-cols-2 gap-px border border-ink-line bg-ink-line sm:grid-cols-4 lg:grid-cols-7">
+                {STATUSES.map((row) => (
+                  <li key={row.k} className="bg-white p-3">
+                    <p className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-ink-soft">
+                      <span
+                        className="h-2.5 w-2.5"
+                        style={{ background: row.color }}
+                      />
+                      {row.label}
+                    </p>
+                    <p className="mt-1.5 font-display text-2xl font-bold">
+                      {counts?.[row.k] ?? 0}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <button
             type="button"
             onClick={() => navigate(`/dashboard/projects/${project.id}/board`)}

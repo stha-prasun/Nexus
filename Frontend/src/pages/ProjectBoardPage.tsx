@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useDialog } from '@/components/dashboard/AppDialog';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { LockIcon } from '@/components/dashboard/Icons';
@@ -16,14 +16,27 @@ import { Avatar, RoleBadge } from '@/components/dashboard/OrgView';
 import { ProjectTabs } from '@/components/dashboard/ProjectTabs';
 import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
-import { logout, type Project, type ProjectMember, type User } from '@/lib/api';
 import {
-  dayStr,
+  ApiError,
+  assignTask,
+  changeTaskStatus,
+  createTask,
+  deleteTask,
+  getTask,
+  listProjectTasks,
+  logout,
+  type ProjectMember,
+  type Task,
+  type TaskPriority,
+  updateTask,
+} from '@/lib/api';
+import {
   dueChip,
-  keyPrefix,
+  fromApiStatus,
   STATUSES,
   type StatusKey,
   statusLabel,
+  toApiStatus,
 } from '@/lib/board';
 import { BTN, CURRENT_USER, INPUT, ROLES, toRoleKey } from '@/lib/dashboard';
 import {
@@ -37,7 +50,7 @@ import { clearMembers } from '@/store/slices/membersSlice';
 import { clearOrg } from '@/store/slices/orgSlice';
 import { clearProjects } from '@/store/slices/projectsSlice';
 
-type PriorityKey = 'urgent' | 'high' | 'medium' | 'low';
+type PriorityKey = TaskPriority;
 
 const PRIORITIES: Record<PriorityKey, { label: string; color: string }> = {
   urgent: { label: 'Urgent', color: '#E5484D' },
@@ -46,8 +59,9 @@ const PRIORITIES: Record<PriorityKey, { label: string; color: string }> = {
   low: { label: 'Low', color: '#8A90AD' },
 };
 
+/** UI-shaped task — the board's local drag state (API status mapped in/out). */
 interface BoardTask {
-  id: number;
+  id: string;
   key: string;
   title: string;
   description: string;
@@ -57,150 +71,36 @@ interface BoardTask {
   priority: PriorityKey;
   /** YYYY-MM-DD — the shape <input type="date"> expects. */
   due: string | null;
+  /** Read-only view dialog extras — never mutated by the board. */
+  createdByName: string;
+  createdAt: string;
 }
 
-const DEMO_ADDED_AT = '2026-01-05T09:00:00.000Z';
+/** API row → the board's local shape (status through the lib/board maps). */
+const fromApiTask = (task: Task): BoardTask => ({
+  id: task.id,
+  key: task.key,
+  title: task.title,
+  description: task.description,
+  status: fromApiStatus(task.status),
+  assigneeId: task.assignee?.id ?? null,
+  priority: task.priority,
+  due: task.dueDate,
+  createdByName: task.createdByName,
+  createdAt: task.createdAt,
+});
 
-/** Demo roster from the design (project-board.html). */
-const DEMO_MEMBERS: ProjectMember[] = [
-  {
-    userId: 'demo-maya',
-    name: 'Maya Kim',
-    email: 'maya@acme.com',
-    role: 'Admin',
-    isLead: false,
-    addedAt: DEMO_ADDED_AT,
-  },
-  {
-    userId: 'demo-jonas',
-    name: 'Jonas Weber',
-    email: 'jonas@acme.com',
-    role: 'PM',
-    isLead: true,
-    addedAt: DEMO_ADDED_AT,
-  },
-  {
-    userId: 'demo-tomas',
-    name: 'Tomás Reyes',
-    email: 'tomas@acme.com',
-    role: 'PM',
-    isLead: false,
-    addedAt: DEMO_ADDED_AT,
-  },
-  {
-    userId: 'demo-dana',
-    name: 'Dana Ortiz',
-    email: 'dana@acme.com',
-    role: 'HR',
-    isLead: false,
-    addedAt: DEMO_ADDED_AT,
-  },
-  {
-    userId: 'demo-priya',
-    name: 'Priya Patel',
-    email: 'priya@acme.com',
-    role: 'Dev',
-    isLead: false,
-    addedAt: DEMO_ADDED_AT,
-  },
-  {
-    userId: 'demo-lena',
-    name: 'Lena Wu',
-    email: 'lena@acme.com',
-    role: 'Dev',
-    isLead: false,
-    addedAt: DEMO_ADDED_AT,
-  },
-];
-
-/**
- * Fallback while the projects store is empty (a fresh deep link — the board
- * itself never fetches): the design's "Website relaunch", with the signed-in
- * viewer folded in so the access gates stay open.
- */
-function demoProject(id: string | undefined, viewer: User | null): Project {
-  const members = [...DEMO_MEMBERS];
-  if (viewer && !members.some((member) => member.email === viewer.email)) {
-    members.push({
-      userId: viewer.id,
-      name: viewer.name,
-      email: viewer.email,
-      role: viewer.role,
-      isLead: viewer.role === 'PM',
-      addedAt: DEMO_ADDED_AT,
-    });
-  }
-  return {
-    id: id ?? 'demo',
-    name: 'Website relaunch',
-    description: 'Rebuild the marketing site and move it to the new CMS.',
-    color: '#FFD83D',
-    createdByUserId: 'demo-maya',
-    createdByName: 'Maya Kim',
-    members,
-    createdAt: DEMO_ADDED_AT,
-    updatedAt: DEMO_ADDED_AT,
-  };
-}
-
-/** [title, status, demo assignee email, priority, due offset in days]. */
-type SeedRow = [string, StatusKey, string | null, PriorityKey, number];
-
-const SEED: SeedRow[] = [
-  ['Finalize homepage copy', 'done', 'priya@acme.com', 'medium', -6],
-  ['Export brand assets', 'done', 'lena@acme.com', 'low', -5],
-  ['Set up analytics', 'resolved', 'priya@acme.com', 'medium', -2],
-  ['Update API docs', 'testing', 'lena@acme.com', 'high', 1],
-  ['Fix checkout timeout', 'review', 'priya@acme.com', 'urgent', 0],
-  ['Write release notes', 'review', 'jonas@acme.com', 'low', 3],
-  ['Review mobile layout', 'progress', 'priya@acme.com', 'high', 1],
-  ['Hero animation', 'progress', 'lena@acme.com', 'medium', 4],
-  [
-    'Waiting on legal for cookie banner',
-    'hold',
-    'jonas@acme.com',
-    'medium',
-    -1,
-  ],
-  ['Migrate blog posts', 'todo', null, 'medium', 7],
-  ['Audit accessibility', 'todo', 'lena@acme.com', 'high', 6],
-  ['Set up staging redirects', 'todo', 'priya@acme.com', 'low', 9],
-];
-
-/**
- * Seed emails map onto the current roster — a real project falls back to a
- * stable round-robin so every member owns movable cards of their own.
- */
-const resolveAssignee = (
-  email: string,
-  members: ProjectMember[],
-  index: number,
-): string | null => {
-  const hit = members.find((member) => member.email === email);
-  if (hit) return hit.userId;
-  return members[index % members.length]?.userId ?? null;
-};
-
-function seedTasks(project: Project): BoardTask[] {
-  const prefix = keyPrefix(project.name);
-  return SEED.map(([title, status, email, priority, offset], index) => ({
-    id: index + 1,
-    key: `${prefix}-${index + 1}`,
-    title,
-    description: '',
-    status,
-    assigneeId: email ? resolveAssignee(email, project.members, index) : null,
-    priority,
-    due: dayStr(offset),
-  }));
-}
+const apiMessage = (error: unknown): string =>
+  error instanceof ApiError
+    ? error.messages.join(' ')
+    : "Can't reach the server. Please try again shortly.";
 
 /** Remove + reinsert (the design's moveTask) — order elsewhere is preserved. */
 function relocate(
   list: BoardTask[],
-  id: number,
+  id: string,
   status: StatusKey,
-  beforeId: number | null,
+  beforeId: string | null,
 ): BoardTask[] {
   const current = list.find((task) => task.id === id);
   if (!current) return list;
@@ -319,6 +219,7 @@ function BoardSkeleton({ label }: { label: string }) {
 
 export function ProjectBoardPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { show, element: toastElement } = useToast();
@@ -337,35 +238,27 @@ export function ProjectBoardPage() {
     retry: retryProjects,
   } = useProjects();
 
-  // Store project when known; the design's demo stands in while the list is
-  // still empty. Org/list hydration is skeletoned below, so the demo only
-  // appears once loading has genuinely finished.
-  const stored = known.find((project) => project.id === id);
-  const project =
-    stored ?? (known.length === 0 ? demoProject(id, authUser) : null);
-  const source = project
-    ? stored
-      ? `real:${project.id}`
-      : `demo:${project.id}`
-    : 'none';
+  // The store is the roster's source of truth — no demo fallback: while the
+  // list hydrates the skeleton below covers the gap, and an unknown id is a
+  // genuine "not found".
+  const project = known.find((row) => row.id === id) ?? null;
+  const projectId = project?.id ?? null;
 
-  const [tasks, setTasks] = useState<BoardTask[]>(() =>
-    project ? seedTasks(project) : [],
-  );
-  const [seededFor, setSeededFor] = useState(source);
-  if (seededFor !== source) {
-    // New route id, or the store caught up mid-load — the seed follows the roster.
-    setSeededFor(source);
-    setTasks(project ? seedTasks(project) : []);
-  }
+  const [tasks, setTasks] = useState<BoardTask[]>([]);
+  const [tasksStatus, setTasksStatus] = useState<
+    'idle' | 'loading' | 'ready' | 'error'
+  >('idle');
+  const [tasksError, setTasksError] = useState<string[]>([]);
+  // Retry bump — the fetch effect keys off it without re-running on renders.
+  const [tasksNonce, setTasksNonce] = useState(0);
 
   const [q, setQ] = useState('');
   const [mine, setMine] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<StatusKey>>(() => new Set());
-  const [dragId, setDragId] = useState<number | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     status: StatusKey;
-    beforeId: number | null;
+    beforeId: string | null;
   } | null>(null);
   const bodyRefs = useRef<Partial<Record<StatusKey, HTMLDivElement | null>>>(
     {},
@@ -385,18 +278,101 @@ export function ProjectBoardPage() {
   const isLead =
     currentUserId !== null &&
     members.some((member) => member.userId === currentUserId && member.isLead);
-  // Design's full(): create, edit, delete, assign and move anything.
+  // Design's full(): edit fields, delete, assign and move anything.
   const full =
     actorRole === 'Admin' || isLead || (actorRole === 'PM' && isMember);
   const canMove = (task: BoardTask): boolean =>
     full || (currentUserId !== null && task.assigneeId === currentUserId);
-  const access: 'ok' | 'missing' | 'hr' | 'denied' = !project
+  // HR reads the board too (plan §1 — GET visibility), so the locked screen
+  // is only for missing / non-member projects; `full` stays false for HR and
+  // hides every mutation, matching the API's 403s.
+  const canView = actorRole === 'Admin' || actorRole === 'HR' || isMember;
+  const access: 'ok' | 'missing' | 'denied' = !project
     ? 'missing'
-    : actorRole === 'HR'
-      ? 'hr'
-      : actorRole === 'Admin' || isMember
-        ? 'ok'
-        : 'denied';
+    : canView
+      ? 'ok'
+      : 'denied';
+  // Create: Admin + project members (a Dev's create is a self-assign) —
+  // never HR (§1.1 matrix; HR is never a project member anyway).
+  const canCreate = actorRole === 'Admin' || isMember;
+
+  // Board payload — seeded from the API on every project change; the local
+  // `tasks` state exists purely for drag performance (plan §10).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tasksNonce is a retry bump — it must re-run the fetch without being read inside.
+  useEffect(() => {
+    if (projectId === null || !canView) return;
+    let cancelled = false;
+    setTasksStatus('loading');
+    setTasksError([]);
+    listProjectTasks(projectId)
+      .then(({ tasks: rows }) => {
+        if (cancelled) return;
+        setTasks(rows.map(fromApiTask));
+        setTasksStatus('ready');
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 401) {
+          // Definitive session verdict — RequireAuth bounces to login.
+          dispatch(setAnonymous());
+          return;
+        }
+        setTasksStatus('error');
+        setTasksError(
+          error instanceof ApiError
+            ? error.messages
+            : ["Can't reach the server. Please try again shortly."],
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, canView, tasksNonce, dispatch]);
+
+  // Notification deep link: ?task=<id> opens that task's read-only view
+  // dialog. The param is consumed once (replace) so re-renders can't reopen
+  // it; a fresh click re-sets it. The view fn is read through a latest-ref
+  // assigned further down (it closes over this render's state), keeping the
+  // effect stable.
+  const openDialogRef = useRef<((task: BoardTask) => Promise<void>) | null>(
+    null,
+  );
+  const handledTaskParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    const wanted = searchParams.get('task');
+    if (!wanted) {
+      handledTaskParamRef.current = null;
+      return;
+    }
+    if (handledTaskParamRef.current === wanted || tasksStatus !== 'ready') {
+      return;
+    }
+    handledTaskParamRef.current = wanted;
+    setSearchParams({}, { replace: true });
+    const open = openDialogRef.current;
+    if (!open) return;
+    const local = tasks.find((item) => item.id === wanted);
+    if (local) {
+      void open(local);
+      return;
+    }
+    // Not on this board (or deleted since) — resolve it directly (§10).
+    getTask(wanted)
+      .then(({ task }) => {
+        if (task.projectId === projectId) {
+          void open(fromApiTask(task));
+        } else {
+          show('That task no longer exists.');
+        }
+      })
+      .catch((error: unknown) => {
+        show(
+          error instanceof ApiError && error.status === 404
+            ? 'That task no longer exists.'
+            : apiMessage(error),
+        );
+      });
+  }, [searchParams, tasksStatus, tasks, projectId, setSearchParams, show]);
 
   useEffect(() => {
     document.title = project
@@ -428,17 +404,36 @@ export function ProjectBoardPage() {
     })();
   };
 
+  /**
+   * Optimistic status move: relocate locally at once (drag feel), then
+   * `PATCH /tasks/:id/status`. A within-column drop is cosmetic only — the
+   * API has no ordering — so it never leaves the client. Failure rolls the
+   * list back to its pre-move snapshot and toasts (plan §10).
+   */
   const moveTask = (
-    id: number,
+    id: string,
     status: StatusKey,
-    beforeId: number | null = null,
+    beforeId: string | null = null,
   ): void => {
     const current = tasks.find((task) => task.id === id);
     if (!current) return;
+    const previous = tasks;
     setTasks((prev) => relocate(prev, id, status, beforeId));
-    if (current.status !== status) {
-      show(`${current.key} moved to ${statusLabel(status)}`);
-    }
+    if (current.status === status) return; // cosmetic reorder inside a column
+    show(`${current.key} moved to ${statusLabel(status)}`);
+    changeTaskStatus(id, toApiStatus(status))
+      .then(({ task }) => {
+        const nextStatus = fromApiTask(task).status;
+        setTasks((prev) =>
+          prev.map((item) =>
+            item.id === id ? { ...item, status: nextStatus } : item,
+          ),
+        );
+      })
+      .catch((error: unknown) => {
+        setTasks(previous);
+        show(apiMessage(error));
+      });
   };
 
   const toggleCol = (key: StatusKey): void => {
@@ -470,13 +465,13 @@ export function ProjectBoardPage() {
     // The cobalt line precedes this card — the dragged card never qualifies, so
     // dropping beside itself keeps its place (the design's trick).
     const cards = [...body.querySelectorAll<HTMLElement>('[data-task]')].filter(
-      (card) => Number(card.dataset.task) !== dragId,
+      (card) => card.dataset.task !== dragId,
     );
-    let beforeId: number | null = null;
+    let beforeId: string | null = null;
     for (const card of cards) {
       const rect = card.getBoundingClientRect();
       if (event.clientY < rect.top + rect.height / 2) {
-        beforeId = Number(card.dataset.task);
+        beforeId = card.dataset.task ?? null;
         break;
       }
     }
@@ -579,7 +574,7 @@ export function ProjectBoardPage() {
     event: KeyboardEvent<HTMLElement>,
     task: BoardTask,
   ): void => {
-    // Enter/Space activate the card natively (it's a <button>) → onClick opens it.
+    // Enter/Space activate the card natively (it's a <button>) → onClick opens its view.
     if (
       (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') ||
       !canMove(task)
@@ -656,9 +651,30 @@ export function ProjectBoardPage() {
     const edit = task !== null;
     const movable = task ? canMove(task) : true;
     const readOnly = task !== null && !full;
+    const isDev = actorRole === 'Dev';
     // The delete link submits through this flag instead of smuggling a hidden
     // input into the form, which would poison later dialogs' FormData.
     let deleteRequested = false;
+
+    // Client mirror of TasksPolicy.canAssignTarget (§1.2) — the server stays
+    // the authority; this only shapes which options the select offers:
+    // Admin → Dev/PM/Admin targets; PM/Lead → Dev targets; HR excluded.
+    const assignable: ProjectMember[] = full
+      ? members.filter((member) => {
+          if (member.role === 'HR') return false;
+          if (actorRole === 'Admin') return true;
+          return member.role === 'Dev';
+        })
+      : [];
+    // The current value (or the Dev's forced self on create) always renders
+    // as an option even when the actor couldn't pick it fresh.
+    const ensureOption = (userId: string | null): void => {
+      if (!userId || assignable.some((row) => row.userId === userId)) return;
+      const member = members.find((row) => row.userId === userId);
+      if (member) assignable.push(member);
+    };
+    if (task) ensureOption(task.assigneeId);
+    if (!task && isDev) ensureOption(currentUserId);
 
     const result = await ask({
       title: edit ? `${task.key} · ${task.title}` : 'New task',
@@ -710,14 +726,21 @@ export function ProjectBoardPage() {
               <select
                 id="t-assignee"
                 name="assignee"
-                disabled={readOnly}
-                defaultValue={task?.assigneeId ?? ''}
+                // A Dev's create is a self-assign (§1.1) — the server forces
+                // it, so the select is locked to self rather than free.
+                disabled={readOnly || (!task && isDev)}
+                defaultValue={
+                  !task && isDev
+                    ? (currentUserId ?? '')
+                    : (task?.assigneeId ?? '')
+                }
                 className={INPUT}
               >
                 <option value="">Unassigned</option>
-                {members.map((member) => (
+                {assignable.map((member) => (
                   <option key={member.userId} value={member.userId}>
                     {member.name}
+                    {!task && member.userId === currentUserId ? ' (you)' : ''}
                   </option>
                 ))}
               </select>
@@ -790,6 +813,12 @@ export function ProjectBoardPage() {
         ),
       });
       if (!confirm) return;
+      try {
+        await deleteTask(task.id);
+      } catch (error) {
+        show(apiMessage(error));
+        return;
+      }
       setTasks((prev) => prev.filter((item) => item.id !== task.id));
       show(`${task.key} deleted`);
       return;
@@ -803,45 +832,178 @@ export function ProjectBoardPage() {
     const due = String(result.get('due') ?? '') || null;
 
     if (!task) {
-      const num =
-        tasks.reduce(
-          (max, item) => Math.max(max, Number(item.key.split('-')[1]) || 0),
-          0,
-        ) + 1;
-      setTasks((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          key: `${keyPrefix(project.name)}-${num}`,
+      try {
+        const { task: created } = await createTask(project.id, {
           title,
           description,
-          status,
-          assigneeId,
+          status: toApiStatus(status),
           priority,
-          due,
-        },
-      ]);
-      show('Task created');
+          assigneeId: isDev ? currentUserId : assigneeId,
+          dueDate: due,
+        });
+        setTasks((prev) => [...prev, fromApiTask(created)]);
+        show('Task created');
+      } catch (error) {
+        show(apiMessage(error));
+      }
       return;
     }
 
-    const patch = (list: BoardTask[]): BoardTask[] =>
-      full
-        ? list.map((item) =>
-            item.id === task.id
-              ? { ...item, title, description, assigneeId, priority, due }
-              : item,
-          )
-        : list;
+    // Edit — three independent calls, each returning the fresh task; the
+    // last response wins for the local sync (server is authoritative).
+    const statusChanged = status !== task.status;
+    let latest: Task | null = null;
+    try {
+      if (full) {
+        const fieldsChanged =
+          title !== task.title ||
+          description !== task.description ||
+          priority !== task.priority ||
+          due !== task.due;
+        if (fieldsChanged) {
+          const { task: updated } = await updateTask(task.id, {
+            title,
+            description,
+            priority,
+            dueDate: due,
+          });
+          latest = updated;
+        }
+        if (assigneeId !== task.assigneeId) {
+          const { task: assigned } = await assignTask(task.id, assigneeId);
+          latest = assigned;
+        }
+      }
+      // Status moves are open to full actors *and* the assignee (§1.1).
+      if (statusChanged) {
+        const { task: moved } = await changeTaskStatus(
+          task.id,
+          toApiStatus(status),
+        );
+        latest = moved;
+      }
+    } catch (error) {
+      show(apiMessage(error));
+      return;
+    }
 
-    if (status !== task.status) {
-      setTasks((prev) => relocate(patch(prev), task.id, status, null));
+    if (latest !== null) {
+      const applied = latest;
+      setTasks((prev) =>
+        prev.map((item) => (item.id === task.id ? fromApiTask(applied) : item)),
+      );
+    }
+    if (statusChanged) {
       show(`${task.key} moved to ${statusLabel(status)}`);
-    } else if (full) {
-      setTasks(patch);
+    } else if (latest !== null) {
       show('Task updated');
     }
   };
+
+  /**
+   * Read-only task view — what a card click (or a notification deep link)
+   * opens. The Edit button appears only for actors who can actually change
+   * something (`full`, or the assignee with status rights) and hands over to
+   * the edit dialog; everyone else just closes.
+   */
+  const openTaskViewDialog = async (task: BoardTask): Promise<void> => {
+    if (!project) return;
+    const editable = full || canMove(task);
+    const assignee = task.assigneeId
+      ? members.find((member) => member.userId === task.assigneeId)
+      : null;
+    const statusDef = STATUSES.find((row) => row.k === task.status);
+    const priority = PRIORITIES[task.priority];
+    const due = dueChip(task.due, task.status);
+    const created = new Date(task.createdAt).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    const result = await ask({
+      title: `${task.key} · ${task.title}`,
+      ok: 'Edit task',
+      cancelLabel: 'Close',
+      hideOk: !editable,
+      size: 'lg',
+      body: (
+        <>
+          {task.description ? (
+            <p className="whitespace-pre-wrap text-ink">{task.description}</p>
+          ) : (
+            <p className="italic">No description</p>
+          )}
+          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Status
+              </dt>
+              <dd className="mt-1 flex items-center gap-2 font-semibold text-ink">
+                <span
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 shrink-0"
+                  style={{ background: statusDef?.color }}
+                />
+                {statusDef?.label ?? task.status}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Priority
+              </dt>
+              <dd className="mt-1 flex items-center gap-2 font-semibold text-ink">
+                <span
+                  aria-hidden="true"
+                  className="h-2.5 w-2.5 shrink-0"
+                  style={{ background: priority.color }}
+                />
+                {priority.label}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Assignee
+              </dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {assignee
+                  ? `${assignee.name}${
+                      task.assigneeId === currentUserId ? ' (you)' : ''
+                    }`
+                  : 'Unassigned'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Due date
+              </dt>
+              <dd
+                className={cn(
+                  'mt-1 font-semibold',
+                  due.late ? 'text-red-600' : 'text-ink',
+                )}
+              >
+                {task.due ? due.text : '—'}
+              </dd>
+            </div>
+            <div className="sm:col-span-2">
+              <dt className="text-xs font-bold uppercase tracking-wider text-ink-soft">
+                Created by
+              </dt>
+              <dd className="mt-1 font-semibold text-ink">
+                {task.createdByName} · {created}
+              </dd>
+            </div>
+          </dl>
+        </>
+      ),
+    });
+    // Submitting means "Edit task" — chain into the edit dialog; Close is null.
+    if (!result || !editable) return;
+    await openTaskDialog(task);
+  };
+  // Latest-ref handoff for the ?task= deep-link effect above.
+  openDialogRef.current = openTaskViewDialog;
 
   const renderCard = (task: BoardTask): ReactNode => {
     const priority = PRIORITIES[task.priority];
@@ -860,7 +1022,7 @@ export function ProjectBoardPage() {
         onDragStart={(event) => handleDragStart(event, task)}
         onDragEnd={handleDragEnd}
         onKeyDown={(event) => handleCardKeyDown(event, task)}
-        onClick={() => void openTaskDialog(task)}
+        onClick={() => void openTaskViewDialog(task)}
         className={cn(
           'w-full border border-ink-line bg-white p-3 text-left outline-none transition-colors hover:border-ink focus-visible:border-cobalt focus-visible:ring-2 focus-visible:ring-cobalt/30',
           movable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer',
@@ -989,15 +1151,6 @@ export function ProjectBoardPage() {
         to="/dashboard/projects"
       />
     );
-  } else if (access === 'hr') {
-    body = (
-      <LockedScreen
-        title="Projects aren't part of the HR role"
-        note="HR looks after the people in the organization. Project work is handled by PMs, Admins and Devs."
-        cta="Go to Organization"
-        to="/dashboard"
-      />
-    );
   } else if (access === 'denied' || !project) {
     body = (
       <LockedScreen
@@ -1006,6 +1159,24 @@ export function ProjectBoardPage() {
         cta="Back to Projects"
         to="/dashboard/projects"
       />
+    );
+  } else if (tasksStatus === 'loading' || tasksStatus === 'idle') {
+    body = <BoardSkeleton label="Loading tasks" />;
+  } else if (tasksStatus === 'error') {
+    body = (
+      <div className="flex flex-col items-center gap-4 py-24 text-center">
+        <p className="text-[15px] font-semibold text-ink">
+          Couldn&apos;t load tasks.
+        </p>
+        <p className="max-w-sm text-sm text-ink-soft">{tasksError.join(' ')}</p>
+        <button
+          type="button"
+          onClick={() => setTasksNonce((value) => value + 1)}
+          className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+        >
+          Retry
+        </button>
+      </div>
     );
   } else {
     const leadLabel =
@@ -1101,7 +1272,7 @@ export function ProjectBoardPage() {
               </div>
             </div>
           </div>
-          {full ? (
+          {canCreate ? (
             <button
               type="button"
               onClick={() => void openTaskDialog(null, 'todo')}
@@ -1140,9 +1311,11 @@ export function ProjectBoardPage() {
             Only mine
           </button>
           <p className="ml-auto hidden text-xs text-ink-soft md:block">
-            {full
-              ? 'Drag cards between columns, or focus one and use ← →.'
-              : 'You can move tasks assigned to you. Drag them, or focus one and use ← →.'}
+            {actorRole === 'HR'
+              ? 'You have read-only access to this board.'
+              : full
+                ? 'Drag cards between columns, or focus one and use ← →.'
+                : 'You can move tasks assigned to you. Drag them, or focus one and use ← →.'}
           </p>
         </div>
 
@@ -1256,7 +1429,7 @@ export function ProjectBoardPage() {
                     </p>
                   ) : null}
                 </div>
-                {full ? (
+                {canCreate ? (
                   <button
                     type="button"
                     onClick={() => void openTaskDialog(null, status.k)}

@@ -1,5 +1,7 @@
 /** Shared board domain — statuses, task keys and due-chip copy (project-board.html). */
 
+import type { TaskPriority, TaskStatus } from '@/lib/api';
+
 export type StatusKey =
   | 'todo'
   | 'progress'
@@ -27,6 +29,42 @@ export const STATUSES: StatusDef[] = [
 
 export const statusLabel = (k: StatusKey): string =>
   STATUSES.find((status) => status.k === k)?.label ?? k;
+
+/**
+ * API status → UI StatusKey. Three of the seven differ; the rest are shared
+ * vocabulary. `lib/board.ts` owns the mapping so the UI's StatusKeys never
+ * change shape (plan §10).
+ */
+const FROM_API: Record<TaskStatus, StatusKey> = {
+  todo: 'todo',
+  in_progress: 'progress',
+  in_review: 'review',
+  on_hold: 'hold',
+  testing: 'testing',
+  resolved: 'resolved',
+  done: 'done',
+};
+
+const TO_API: Record<StatusKey, TaskStatus> = {
+  todo: 'todo',
+  progress: 'in_progress',
+  review: 'in_review',
+  hold: 'on_hold',
+  testing: 'testing',
+  resolved: 'resolved',
+  done: 'done',
+};
+
+export const fromApiStatus = (status: TaskStatus): StatusKey =>
+  FROM_API[status] ?? status;
+
+export const toApiStatus = (key: StatusKey): TaskStatus => TO_API[key] ?? key;
+
+/** Priority vocabulary is identical on both sides — explicit map for symmetry. */
+export const fromApiPriority = (priority: TaskPriority): TaskPriority =>
+  priority;
+
+export const toApiPriority = (priority: TaskPriority): TaskPriority => priority;
 
 /** Task-key prefix — first letters of up to three words of the project name (WR-4). */
 export const keyPrefix = (name: string): string =>

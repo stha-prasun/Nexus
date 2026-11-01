@@ -491,3 +491,196 @@ export function setProjectLead(
     { isLead },
   );
 }
+
+// -------------------------------------------------------------------- tasks
+
+/** API enum — the UI's StatusKey mapping lives in `lib/board.ts`. */
+export type TaskStatus =
+  | 'todo'
+  | 'in_progress'
+  | 'in_review'
+  | 'on_hold'
+  | 'testing'
+  | 'resolved'
+  | 'done';
+
+export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
+
+/** Board avatar payload — null when unassigned. */
+export interface TaskAssignee {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** Full API task shape (`TaskResponseDto`). */
+export interface Task {
+  id: string;
+  projectId: string;
+  /** Per-project monotonic sequence. */
+  seq: number;
+  /** Immutable key — stored at creation, survives renames (`WR-4`). */
+  key: string;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  assignee: TaskAssignee | null;
+  /** Date-only, UTC. Null = no due date. */
+  dueDate: string | null;
+  createdByUserId: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Board payload ordered by (priorityRank, createdAt) — no pagination (§1 scale). */
+export function listProjectTasks(
+  projectId: string,
+): Promise<{ tasks: Task[] }> {
+  return apiRequest<{ tasks: Task[] }>(
+    `/projects/${encodeURIComponent(projectId)}/tasks`,
+    'GET',
+  );
+}
+
+export interface CreateTaskPayload {
+  title: string;
+  description?: string;
+  status?: TaskStatus;
+  priority?: TaskPriority;
+  /** Must be an ACTIVE project member; a Dev's create is forced to self. */
+  assigneeId?: string | null;
+  /** YYYY-MM-DD, ≥ today (UTC) — else 400 due_date_past. */
+  dueDate?: string | null;
+}
+
+/** 201 `{ task }`. The server derives the key (advisory-locked counter). */
+export function createTask(
+  projectId: string,
+  payload: CreateTaskPayload,
+): Promise<{ task: Task }> {
+  return apiRequest<{ task: Task }>(
+    `/projects/${encodeURIComponent(projectId)}/tasks`,
+    'POST',
+    payload,
+  );
+}
+
+/** 404 task_not_found when missing or invisible (indistinguishable). */
+export function getTask(id: string): Promise<{ task: Task }> {
+  return apiRequest<{ task: Task }>(`/tasks/${encodeURIComponent(id)}`, 'GET');
+}
+
+/** Field edits only — status and assignee are deliberately not editable here. */
+export function updateTask(
+  id: string,
+  payload: {
+    title?: string;
+    description?: string;
+    priority?: TaskPriority;
+    dueDate?: string | null;
+  },
+): Promise<{ task: Task }> {
+  return apiRequest<{ task: Task }>(
+    `/tasks/${encodeURIComponent(id)}`,
+    'PATCH',
+    payload,
+  );
+}
+
+/** Free transition between the seven statuses — last-write-wins. */
+export function changeTaskStatus(
+  id: string,
+  status: TaskStatus,
+): Promise<{ task: Task }> {
+  return apiRequest<{ task: Task }>(
+    `/tasks/${encodeURIComponent(id)}/status`,
+    'PATCH',
+    { status },
+  );
+}
+
+/** `null` unassigns. Same-value assign is a server-side no-op. */
+export function assignTask(
+  id: string,
+  assigneeId: string | null,
+): Promise<{ task: Task }> {
+  return apiRequest<{ task: Task }>(
+    `/tasks/${encodeURIComponent(id)}/assign`,
+    'POST',
+    { assigneeId },
+  );
+}
+
+/** 204 — the task's notifications cascade with it. */
+export function deleteTask(id: string): Promise<void> {
+  return apiRequest<void>(`/tasks/${encodeURIComponent(id)}`, 'DELETE');
+}
+
+// ------------------------------------------------------------- notifications
+
+/** Exactly two ship today; stored as varchar so more types never need a migration. */
+export type NotificationType = 'task_assigned' | 'due_reminder';
+
+/** One row of the notification center — snapshot text, survives task edits. */
+export interface Notification {
+  id: string;
+  type: NotificationType;
+  /** Deep-link target; null only for future non-task types. */
+  taskId: string | null;
+  title: string;
+  body: string;
+  /** Read timestamp; null = unread. */
+  readAt: string | null;
+  /** Fixed-width UTC string (six fraction digits) — doubles as the cursor value. */
+  createdAt: string;
+}
+
+/** Page boundary — pass back exactly as received; null nextCursor = last page. */
+export interface NotificationCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface ListNotificationsResponse {
+  notifications: Notification[];
+  /** Always derived from the DB (`readAt IS NULL`). */
+  unreadCount: number;
+  nextCursor: NotificationCursor | null;
+}
+
+/** Cursor-paginated, newest first. Omitted cursor = first page (limit 30, max 50). */
+export function listNotifications(
+  options: { cursor?: NotificationCursor | null; limit?: number } = {},
+): Promise<ListNotificationsResponse> {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.cursor) {
+    params.set('cursorCreatedAt', options.cursor.createdAt);
+    params.set('cursorId', options.cursor.id);
+  }
+  const query = params.toString();
+  return apiRequest<ListNotificationsResponse>(
+    `/notifications${query ? `?${query}` : ''}`,
+    'GET',
+  );
+}
+
+/** 204 — not-yours → 404; already read → no-op. */
+export function markNotificationRead(id: string): Promise<void> {
+  return apiRequest<void>(
+    `/notifications/${encodeURIComponent(id)}/read`,
+    'PATCH',
+  );
+}
+
+/** 204 — marks every unread row of the caller read in one UPDATE. */
+export function markAllNotificationsRead(): Promise<void> {
+  return apiRequest<void>('/notifications/read-all', 'POST');
+}
+
+/** Absolute URL of the SSE stream — the transport lives in `notificationsStream.ts`. */
+export function notificationsStreamUrl(): string {
+  return `${BASE_URL}/notifications/stream`;
+}

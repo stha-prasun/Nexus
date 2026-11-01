@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { NotificationCenter } from '@/components/dashboard/NotificationCenter';
 
 interface TopBarProps {
   crumb: ReactNode;
@@ -25,7 +26,10 @@ export function TopBar({ crumb, menuOpen, onMenuToggle }: TopBarProps) {
         Menu
       </button>
       <p className="text-sm text-ink-soft">{crumb}</p>
-      <span className="hidden text-sm text-ink-soft sm:block">{today}</span>
+      <span className="flex items-center gap-3">
+        <span className="hidden text-sm text-ink-soft sm:block">{today}</span>
+        <NotificationCenter />
+      </span>
     </header>
   );
 }

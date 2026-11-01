@@ -4,6 +4,7 @@ import { Provider } from 'react-redux';
 import { RouterProvider } from 'react-router/dom';
 import { LoadingBarContainer } from 'react-top-loading-bar';
 import { SessionGate } from '@/components/auth/SessionGate';
+import { NotificationsStreamGate } from '@/components/dashboard/NotificationsStreamGate';
 import { router } from '@/router';
 import { store } from '@/store';
 import './index.css';
@@ -21,6 +22,7 @@ createRoot(rootElement).render(
         props={{ color: '#1f2fe0', height: 3, shadow: false }}
       >
         <SessionGate>
+          <NotificationsStreamGate />
           <RouterProvider router={router} />
         </SessionGate>
       </LoadingBarContainer>

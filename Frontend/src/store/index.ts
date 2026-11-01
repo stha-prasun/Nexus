@@ -1,6 +1,7 @@
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer from '@/store/slices/authSlice';
 import membersReducer from '@/store/slices/membersSlice';
+import notificationsReducer from '@/store/slices/notificationsSlice';
 import orgReducer from '@/store/slices/orgSlice';
 import projectsReducer from '@/store/slices/projectsSlice';
 
@@ -10,6 +11,7 @@ export const store = configureStore({
     org: orgReducer,
     members: membersReducer,
     projects: projectsReducer,
+    notifications: notificationsReducer,
   },
 });
 

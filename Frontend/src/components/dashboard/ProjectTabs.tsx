@@ -7,9 +7,9 @@ export type ProjectTabKey = 'overview' | 'board' | 'documents';
 interface ProjectTabsProps {
   projectId: string;
   active: ProjectTabKey;
-  /** Live task count when the caller holds one (the board); else the demo seed. */
+  /** Live task count — omitted (no badge) until the caller has one. */
   taskCount?: number;
-  /** Live document count when the caller holds one (documents); else the demo seed. */
+  /** Live document count — omitted (no badge) until the caller has one. */
   docCount?: number;
 }
 
@@ -21,8 +21,8 @@ interface ProjectTabsProps {
 export function ProjectTabs({
   projectId,
   active,
-  taskCount = 12,
-  docCount = 4,
+  taskCount,
+  docCount,
 }: ProjectTabsProps) {
   const base = `/dashboard/projects/${projectId}`;
   const item = (
