@@ -1,10 +1,8 @@
 import { Injectable, type OnApplicationBootstrap } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { Redis } from 'ioredis';
-import type { Client as MinioClient } from 'minio';
 import type { Pool } from 'pg';
 import { POSTGRES_POOL } from '../../module/database/constants/database.contants';
-import { MINIO_CLIENT } from '../../module/health/constants/health.contants';
 import { REDIS_CLIENT } from '../../module/redis/constants/redis.constants';
 import { truncateMiddle } from '../format';
 import { AppLogger } from '../logger/logger';
@@ -34,20 +32,6 @@ const sqlLabel = (args: unknown[]): string => {
   }
   if (!text) return 'query';
   return truncateMiddle(text.replace(/\s+/g, ' ').trim(), 60);
-};
-
-const minioLabel = (args: unknown[]): string => {
-  const options = args[0] as
-    | { method?: unknown; bucketName?: unknown; objectName?: unknown }
-    | undefined;
-  const method =
-    typeof options?.method === 'string' ? options.method : 'REQUEST';
-  const path = [options?.bucketName, options?.objectName]
-    .filter(
-      (part): part is string => typeof part === 'string' && part.length > 0,
-    )
-    .join('/');
-  return path ? `${method} /${path}` : method;
 };
 
 /**
@@ -97,7 +81,7 @@ const tracked = (
 };
 
 /**
- * Patches postgres, redis and minio clients so every call is timed as a span
+ * Patches postgres and redis clients so every call is timed as a span
  * under the active request trace (and fed to the dependency metrics).
  *
  * - postgres: `pool.query` (covers health checks and drizzle queries),
@@ -105,8 +89,9 @@ const tracked = (
  *   client's `query`. A client acquired *inside* an open pool.query span is
  *   marked "suppress" so the same SQL is never counted twice.
  * - redis: `sendCommand` — every command funnels through it.
- * - minio: `makeRequestStreamAsync` — the single HTTP primitive all S3
- *   operations resolve to.
+ * - object storage (span system still `minio`): not patched here — the
+ *   aws-sdk v3 smithy handler is fragile to wrap, so StorageService times
+ *   its own network commands via a `send()` wrapper instead.
  */
 @Injectable()
 export class InstrumentationService implements OnApplicationBootstrap {
@@ -123,7 +108,6 @@ export class InstrumentationService implements OnApplicationBootstrap {
   onApplicationBootstrap(): void {
     this.instrumentPostgres();
     this.instrumentRedis();
-    this.instrumentMinio();
   }
 
   // --- postgres -----------------------------------------------------------
@@ -273,46 +257,6 @@ export class InstrumentationService implements OnApplicationBootstrap {
       return result;
     };
     this.log.debug('redis instrumented (sendCommand)');
-  }
-
-  // --- minio --------------------------------------------------------------
-
-  private instrumentMinio(): void {
-    const minio = this.resolve<MinioClient>(MINIO_CLIENT);
-    const target = minio as unknown as
-      | { makeRequestStreamAsync?: LooseFn }
-      | undefined;
-    if (!minio || typeof target?.makeRequestStreamAsync !== 'function') {
-      this.log.debug('minio instrumentation skipped (client not found)');
-      return;
-    }
-
-    const original = target.makeRequestStreamAsync.bind(minio) as LooseFn;
-    target.makeRequestStreamAsync = (...args: unknown[]): unknown => {
-      const handle = this.tracing.begin('minio', minioLabel(args));
-      let result: unknown;
-      try {
-        result = handle.run(() => original(...args));
-      } catch (error) {
-        handle.end(error);
-        throw error;
-      }
-      if (isThenable(result)) {
-        return Promise.resolve(result).then(
-          (value: unknown) => {
-            handle.end();
-            return value;
-          },
-          (error: unknown) => {
-            handle.end(error);
-            throw error;
-          },
-        );
-      }
-      handle.end();
-      return result;
-    };
-    this.log.debug('minio instrumented (makeRequestStreamAsync)');
   }
 
   // --- helpers ------------------------------------------------------------

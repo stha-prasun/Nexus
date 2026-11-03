@@ -1,7 +1,7 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { POSTGRES_POOL } from '../../database/constants/database.contants';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
-import { MINIO_CLIENT } from '../constants/health.contants';
+import { StorageService } from '../../storage/storage.service';
 import { HealthRepository } from './health.repository';
 
 describe('HealthRepository', () => {
@@ -9,7 +9,7 @@ describe('HealthRepository', () => {
 
   const pool = { query: jest.fn(), end: jest.fn() };
   const redis = { ping: jest.fn(), quit: jest.fn() };
-  const minio = { listBuckets: jest.fn() };
+  const storage = { probe: jest.fn() };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -17,14 +17,14 @@ describe('HealthRepository', () => {
     pool.end.mockResolvedValue(undefined);
     redis.ping.mockResolvedValue('PONG');
     redis.quit.mockResolvedValue('OK');
-    minio.listBuckets.mockResolvedValue([]);
+    storage.probe.mockResolvedValue(undefined);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         HealthRepository,
         { provide: POSTGRES_POOL, useValue: pool },
         { provide: REDIS_CLIENT, useValue: redis },
-        { provide: MINIO_CLIENT, useValue: minio },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 
@@ -40,7 +40,7 @@ describe('HealthRepository', () => {
 
     expect(pool.query).toHaveBeenCalledWith('SELECT 1');
     expect(redis.ping).toHaveBeenCalledTimes(1);
-    expect(minio.listBuckets).toHaveBeenCalledTimes(1);
+    expect(storage.probe).toHaveBeenCalledTimes(1);
 
     expect(checks).toEqual({
       postgres: { status: 'up', latencyMs: expect.any(Number) },
@@ -68,7 +68,7 @@ describe('HealthRepository', () => {
   it('never throws, even when every dependency fails', async () => {
     pool.query.mockRejectedValue(new Error('timeout'));
     redis.ping.mockRejectedValue(new Error('Connection is closed.'));
-    minio.listBuckets.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    storage.probe.mockRejectedValue(new Error('connect ECONNREFUSED'));
 
     const checks = await repository.checkAll();
 

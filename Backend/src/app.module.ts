@@ -4,12 +4,13 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { CommonModule } from './common/common.module';
 import { AuthModule } from './module/auth/api/auth.module';
+import { DocumentsModule } from './module/documents/api/documents.module';
 import { HealthModule } from './module/health/health.module';
 import { MembersModule } from './module/members/api/members.module';
 import { OrganizationModule } from './module/organization/api/organization.module';
 import { ProjectsModule } from './module/projects/api/projects.module';
+import { StorageModule } from './module/storage/storage.module';
 import { TasksModule } from './module/tasks/api/tasks.module';
-import { DocumentsModule } from './documents/documents.module';
 
 @Module({
   imports: [
@@ -25,6 +26,8 @@ import { DocumentsModule } from './documents/documents.module';
     ProjectsModule,
     TasksModule,
     DocumentsModule,
+    // Boot-time ensureBucket/mkdir via StorageService.onModuleInit.
+    StorageModule,
   ],
   providers: [
     // Enforces ThrottlerModule limits + every @Throttle override (register

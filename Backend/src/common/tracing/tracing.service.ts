@@ -21,9 +21,9 @@ export interface SpanHandle {
 
 /**
  * Trace lifecycle: one Trace per HTTP request, child spans for every
- * instrumented dependency call (postgres / redis / minio). The trace is kept
- * in AsyncLocalStorage so nested calls find their parent without plumbing
- * context through every signature.
+ * instrumented dependency call (postgres / redis / object storage). The
+ * trace is kept in AsyncLocalStorage so nested calls find their parent
+ * without plumbing context through every signature.
  */
 @Injectable()
 export class TracingService {

@@ -1,31 +1,32 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Redis } from 'ioredis';
-import type { Client } from 'minio';
 import type { Pool } from 'pg';
 import { POSTGRES_POOL } from '../../database/constants/database.contants';
 import { REDIS_CLIENT } from '../../redis/constants/redis.constants';
-import { MINIO_CLIENT } from '../constants/health.contants';
+import { StorageService } from '../../storage/storage.service';
 import type {
   CheckResult,
   DependencyName,
 } from '../interfaces/health.interfaces';
 
-// Connection ownership: postgres pool (DatabaseModule), redis client
-// (RedisModule) and minio client (HealthModule factory) are each closed by
-// their owner — this repository only probes them.
+// Connection ownership: postgres pool (DatabaseModule) and redis client
+// (RedisModule) are each closed by their owner — this repository only
+// probes them, plus object storage via StorageService.probe().
 @Injectable()
 export class HealthRepository {
   constructor(
     @Inject(POSTGRES_POOL) private readonly pool: Pool,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    @Inject(MINIO_CLIENT) private readonly minio: Client,
+    private readonly storage: StorageService,
   ) {}
 
   async checkAll(): Promise<Record<DependencyName, CheckResult>> {
     const [postgres, redis, minio] = await Promise.all([
       this.timed(() => this.pool.query('SELECT 1')),
       this.timed(() => this.redis.ping()),
-      this.timed(() => this.minio.listBuckets()),
+      // Report key stays `minio` (API shape unchanged) — probe() covers all
+      // three storage drivers (remote → ListBuckets, local → dir writable).
+      this.timed(() => this.storage.probe()),
     ]);
     return { postgres, redis, minio };
   }

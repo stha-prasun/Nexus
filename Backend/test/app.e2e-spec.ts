@@ -4,19 +4,29 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { POSTGRES_POOL } from './../src/module/database/constants/database.contants';
-import { MINIO_CLIENT } from './../src/module/health/constants/health.contants';
 import {
   MAIL_QUEUE,
   MAIL_WORKER,
 } from './../src/module/mail/constants/mail.constants';
 import { REDIS_CLIENT } from './../src/module/redis/constants/redis.constants';
+import { StorageService } from './../src/module/storage/storage.service';
 
 describe('Health (e2e)', () => {
   let app: INestApplication<App>;
 
   const pool = { query: jest.fn(), end: jest.fn() };
-  const redis = { ping: jest.fn(), quit: jest.fn() };
-  const minio = { listBuckets: jest.fn() };
+  // duplicate() serves the SSE subscriber connection (NotificationEmitter).
+  const subscriber = {
+    on: jest.fn(),
+    subscribe: jest.fn().mockResolvedValue(undefined),
+    quit: jest.fn().mockResolvedValue('OK'),
+  };
+  const redis = {
+    ping: jest.fn(),
+    quit: jest.fn(),
+    duplicate: jest.fn(() => subscriber),
+  };
+  const storage = { probe: jest.fn() };
   const mailQueue = { add: jest.fn(), close: jest.fn() };
   const mailWorker = { close: jest.fn() };
 
@@ -28,7 +38,7 @@ describe('Health (e2e)', () => {
     pool.end = jest.fn().mockResolvedValue(undefined);
     redis.ping = jest.fn().mockResolvedValue('PONG');
     redis.quit = jest.fn().mockResolvedValue('OK');
-    minio.listBuckets = jest.fn().mockResolvedValue([]);
+    storage.probe = jest.fn().mockResolvedValue(undefined);
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -37,8 +47,8 @@ describe('Health (e2e)', () => {
       .useValue(pool)
       .overrideProvider(REDIS_CLIENT)
       .useValue(redis)
-      .overrideProvider(MINIO_CLIENT)
-      .useValue(minio)
+      .overrideProvider(StorageService)
+      .useValue(storage)
       .overrideProvider(MAIL_QUEUE)
       .useValue(mailQueue)
       .overrideProvider(MAIL_WORKER)
