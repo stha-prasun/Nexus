@@ -23,6 +23,8 @@ describe('AuthController', () => {
     login: jest.fn(),
     logout: jest.fn(),
     me: jest.fn(),
+    listSessions: jest.fn(),
+    revokeSession: jest.fn(),
   };
   const sessionService = {
     setCookie: jest.fn(),
@@ -36,8 +38,12 @@ describe('AuthController', () => {
       clearCookie: jest.fn(),
     }) as unknown as Response;
 
-  const request = (sid?: string) =>
-    ({ cookies: sid ? { [SESSION_COOKIE_NAME]: sid } : {} }) as never;
+  const request = (sid?: string, headers: Record<string, string> = {}) =>
+    ({
+      cookies: sid ? { [SESSION_COOKIE_NAME]: sid } : {},
+      headers,
+      ip: '127.0.0.1',
+    }) as never;
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -129,7 +135,9 @@ describe('AuthController', () => {
 
       const result = await controller.login(dto, request('sid-old'), response);
 
-      expect(authService.login).toHaveBeenCalledWith(dto, 'sid-old');
+      expect(authService.login).toHaveBeenCalledWith(dto, 'sid-old', {
+        ip: '127.0.0.1',
+      });
       expect(sessionService.setCookie).toHaveBeenCalledWith(
         response,
         'sid-new',
@@ -148,7 +156,9 @@ describe('AuthController', () => {
 
       await controller.login(dto, request(), res());
 
-      expect(authService.login).toHaveBeenCalledWith(dto, undefined);
+      expect(authService.login).toHaveBeenCalledWith(dto, undefined, {
+        ip: '127.0.0.1',
+      });
     });
 
     it('does not swallow service errors (401/403/429/500 keep their status)', async () => {
@@ -218,6 +228,50 @@ describe('AuthController', () => {
         status: 'unauthenticated',
         message: UNAUTHENTICATED_MESSAGE,
       });
+    });
+  });
+
+  describe('listSessions', () => {
+    it('delegates with the cookie sid and wraps the rows', async () => {
+      const sessions = [{ id: 'abc', current: true }];
+      authService.listSessions.mockResolvedValue(sessions);
+
+      const result = await controller.listSessions(request('sid1'));
+
+      expect(authService.listSessions).toHaveBeenCalledWith('sid1');
+      expect(result).toEqual({ sessions });
+    });
+  });
+
+  describe('revokeSession', () => {
+    it('returns the result and leaves the cookie alone for another device', async () => {
+      authService.revokeSession.mockResolvedValue({
+        result: { message: 'bye', revoked: 1 },
+        revokedCurrent: false,
+      });
+      const response = res();
+
+      const result = await controller.revokeSession(
+        'pub1',
+        request('sid1'),
+        response,
+      );
+
+      expect(authService.revokeSession).toHaveBeenCalledWith('sid1', 'pub1');
+      expect(result).toEqual({ message: 'bye', revoked: 1 });
+      expect(sessionService.clearCookie).not.toHaveBeenCalled();
+    });
+
+    it('clears the cookie when the caller revoked their own session', async () => {
+      authService.revokeSession.mockResolvedValue({
+        result: { message: 'bye', revoked: 1 },
+        revokedCurrent: true,
+      });
+      const response = res();
+
+      await controller.revokeSession('pub1', request('sid1'), response);
+
+      expect(sessionService.clearCookie).toHaveBeenCalledWith(response);
     });
   });
 });

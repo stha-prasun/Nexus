@@ -11,11 +11,19 @@ import {
   sessionKey,
   userSessionsKey,
 } from './session.constants';
-import type { SessionData, SessionUser } from './session.types';
+import type { SessionContext, SessionData, SessionUser } from './session.types';
 
 /** One `MULTI/EXEC` tuple: `[error, result]` per queued command. */
 type MultiTuple = [Error | null, unknown];
 type MultiResult = MultiTuple[] | null;
+
+/** A live session row for the device list: snapshot + remaining TTL. */
+export interface ListedSession {
+  sid: string;
+  data: SessionData;
+  /** Absolute expiry epoch (ms) derived from the key's PTTL. */
+  expiresAtMs: number;
+}
 
 const sameSite = (): CookieOptions['sameSite'] => {
   const value = process.env.SESSION_COOKIE_SAME_SITE ?? 'lax';
@@ -53,9 +61,20 @@ export class SessionService {
   async create(
     user: SessionUser,
     ttlSeconds: number = SESSION_TTL_SECONDS,
+    context: SessionContext = {},
   ): Promise<string> {
     const sid = randomBytes(32).toString('hex');
-    const data: SessionData = { ...user, createdAt: new Date().toISOString() };
+    const nowIso = new Date().toISOString();
+    const data: SessionData = {
+      ...user,
+      createdAt: nowIso,
+      lastActiveAt: nowIso,
+      publicId: randomBytes(6).toString('hex'),
+      ...(context.userAgent === undefined
+        ? {}
+        : { userAgent: context.userAgent }),
+      ...(context.ip === undefined ? {} : { ip: context.ip }),
+    };
     const indexKey = userSessionsKey(user.userId);
     const nowSeconds = Math.floor(Date.now() / 1000);
 
@@ -84,6 +103,98 @@ export class SessionService {
       SESSION_TTL_SECONDS,
     );
     return result === 1;
+  }
+
+  /**
+   * Stamp `lastActiveAt` on a session the guard just authenticated, keeping
+   * the key's remaining TTL (PX — never extends, never shortens). Best-effort:
+   * failures are logged, never thrown — activity tracking must not fail a
+   * request. A session that vanishes between read and write is a no-op.
+   */
+  async recordActivity(sid: string, session: SessionData): Promise<void> {
+    try {
+      const pttl = await this.redis.pttl(sessionKey(sid));
+      if (pttl === -2) return; // vanished — nothing to stamp
+      const patched = JSON.stringify({
+        ...session,
+        lastActiveAt: new Date().toISOString(),
+      });
+      if (pttl === -1) {
+        await this.redis.set(sessionKey(sid), patched);
+      } else {
+        await this.redis.set(sessionKey(sid), patched, 'PX', pttl);
+      }
+    } catch (error) {
+      this.log.error('session activity stamp failed', {
+        sid,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Every live session for a user, newest activity first. Reads the index,
+   * then one pipeline of GET+PTTL per sid (N is the user's device count —
+   * single-digit). Index members whose keys expired between ZRANGE and the
+   * pipeline are skipped; corrupt payloads are skipped (same contract as
+   * `get` — SessionAuthGuard owns repair).
+   */
+  async listForUser(userId: string): Promise<ListedSession[]> {
+    const indexKey = userSessionsKey(userId);
+    const sids = await this.redis.zrange(indexKey, 0, '-1');
+    if (sids.length === 0) return [];
+
+    const reads = this.redis.pipeline();
+    for (const sid of sids) {
+      reads.get(sessionKey(sid));
+      reads.pttl(sessionKey(sid));
+    }
+    const results = await reads.exec();
+    if (results === null) {
+      this.log.error('session list: no EXEC result', { userId });
+      return [];
+    }
+
+    const nowMs = Date.now();
+    const listed: ListedSession[] = [];
+    for (let i = 0; i < sids.length; i += 1) {
+      const getTuple = results[i * 2];
+      const pttlTuple = results[i * 2 + 1];
+      if (getTuple === undefined || getTuple[0] !== null) continue;
+      const raw = getTuple[1];
+      if (typeof raw !== 'string') continue;
+      const pttl =
+        pttlTuple !== undefined &&
+        pttlTuple[0] === null &&
+        typeof pttlTuple[1] === 'number'
+          ? pttlTuple[1]
+          : -2;
+      if (pttl === -2) continue; // expired between ZRANGE and GET
+      try {
+        const data = JSON.parse(raw) as SessionData;
+        listed.push({
+          sid: sids[i],
+          data,
+          // PTTL -1 (no expiry, impossible by construction) → treat as now+TTL.
+          expiresAtMs:
+            pttl === -1 ? nowMs + SESSION_TTL_SECONDS * 1000 : nowMs + pttl,
+        });
+      } catch {
+        this.log.error('session list: corrupt payload skipped', {
+          sid: sids[i],
+        });
+      }
+    }
+
+    listed.sort((a, b) => {
+      // Current session first is applied by the caller (it knows the sid);
+      // here: most recently active first.
+      return (
+        Date.parse(b.data.lastActiveAt ?? b.data.createdAt) -
+        Date.parse(a.data.lastActiveAt ?? a.data.createdAt)
+      );
+    });
+    return listed;
   }
 
   async destroy(sid: string): Promise<void> {

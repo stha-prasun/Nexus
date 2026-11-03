@@ -1,13 +1,16 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  Param,
   Post,
   Query,
   Req,
   Res,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -16,6 +19,7 @@ import {
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiQuery,
   ApiTags,
   ApiTooManyRequestsResponse,
@@ -26,6 +30,7 @@ import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { UNAUTHENTICATED_MESSAGE } from './constants/auth.constants';
 import {
+  ListSessionsResponseDto,
   LoginResponseDto,
   LogoutResponseDto,
   MeResponseDto,
@@ -38,6 +43,7 @@ import { LoginDto } from './dto/login.dto';
 import { LogoutDto } from './dto/logout.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
+import { SessionAuthGuard } from './guards/session-auth.guard';
 import { SESSION_COOKIE_NAME } from './session/session.constants';
 import { SessionService } from './session/session.service';
 
@@ -152,7 +158,15 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<LoginResponseDto> {
-    const result = await this.authService.login(dto, sidFrom(req));
+    const userAgent = req.headers['user-agent'];
+    const result = await this.authService.login(dto, sidFrom(req), {
+      ...(typeof userAgent === 'string' && userAgent.length > 0
+        ? { userAgent }
+        : {}),
+      ...(typeof req.ip === 'string' && req.ip.length > 0
+        ? { ip: req.ip }
+        : {}),
+    });
     this.sessionService.setCookie(res, result.sid, result.ttlSeconds);
     return { user: result.user };
   }
@@ -198,5 +212,48 @@ export class AuthController {
       };
     }
     return { user: result.user };
+  }
+
+  @Get('sessions')
+  @UseGuards(SessionAuthGuard)
+  @ApiOperation({
+    summary:
+      'List live sessions for the signed-in user (current first, then most recently active)',
+  })
+  @ApiOkResponse({ type: ListSessionsResponseDto })
+  @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })
+  async listSessions(@Req() req: Request): Promise<ListSessionsResponseDto> {
+    // SessionAuthGuard already rejected a missing/invalid cookie.
+    const sessions = await this.authService.listSessions(sidFrom(req) ?? '');
+    return { sessions };
+  }
+
+  @Delete('sessions/:publicId')
+  @UseGuards(SessionAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Revoke one session by its public handle; idempotent — always 200. Clears the cookie when the current session is revoked.',
+  })
+  @ApiParam({
+    name: 'publicId',
+    description: 'Opaque session handle from GET /auth/sessions',
+  })
+  @ApiOkResponse({ type: LogoutResponseDto })
+  @ApiUnauthorizedResponse({ type: UnauthenticatedResponseDto })
+  async revokeSession(
+    @Param('publicId') publicId: string,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<LogoutResponseDto> {
+    // SessionAuthGuard already rejected a missing/invalid cookie.
+    const { result, revokedCurrent } = await this.authService.revokeSession(
+      sidFrom(req) ?? '',
+      publicId,
+    );
+    if (revokedCurrent) {
+      this.sessionService.clearCookie(res);
+    }
+    return result;
   }
 }

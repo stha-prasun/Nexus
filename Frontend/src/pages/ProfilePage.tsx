@@ -1,24 +1,26 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { AppShell } from '@/components/dashboard/AppShell';
 import { RoleBadge } from '@/components/dashboard/OrgView';
 import { useToast } from '@/components/dashboard/Toast';
-import { logout } from '@/lib/api';
+import {
+  listSessions,
+  logout,
+  revokeSession,
+  type SessionSummary,
+} from '@/lib/api';
 import type { DashboardState, Member, RoleKey } from '@/lib/dashboard';
 import {
   CURRENT_USER,
   createDemoState,
   pad2,
   ROLES,
-  SESSION_LOGOUT_STUB_TOAST,
-  SESSIONS,
   toRoleKey,
 } from '@/lib/dashboard';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
 import { setAnonymous } from '@/store/slices/authSlice';
 import { clearOrg } from '@/store/slices/orgSlice';
 
-const signInTime = new Date();
 const sessionTime = (date: Date): string =>
   date.toLocaleString(undefined, {
     weekday: 'short',
@@ -27,6 +29,57 @@ const sessionTime = (date: Date): string =>
     hour: 'numeric',
     minute: '2-digit',
   });
+
+/** "Today, 9:04 AM" / "Yesterday, 6:30 PM" / "Oct 11, 8:12 PM". */
+const signedInLabel = (iso: string): string => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+  const time = date.toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  if (date.getTime() >= startOfToday) return `Today, ${time}`;
+  if (date.getTime() >= startOfYesterday) return `Yesterday, ${time}`;
+  const day = date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+  return `${day}, ${time}`;
+};
+
+/** "Active now" / "2 hours ago" / "6 days ago" / date for older. */
+const lastActiveLabel = (iso: string): string => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Unknown';
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs < 60_000) return 'Active now';
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'} ago`;
+  return signedInLabel(iso);
+};
+
+/** "in ~24h (Wed, Nov 4, 9:04 AM)" — matches the original copy shape. */
+const expiresLabel = (iso: string): { relative: string; at: string } => {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return { relative: 'unknown', at: '' };
+  const diffMs = date.getTime() - Date.now();
+  const hours = Math.max(1, Math.round(diffMs / (60 * 60 * 1000)));
+  return {
+    relative: diffMs > 0 ? `in ~${hours}h` : 'expired',
+    at: sessionTime(date),
+  };
+};
 
 function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -37,6 +90,8 @@ function Detail({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+type SessionsStatus = 'loading' | 'ready' | 'error';
+
 export function ProfilePage() {
   const [state] = useState<DashboardState>(createDemoState);
   const { show, element: toastElement } = useToast();
@@ -45,12 +100,35 @@ export function ProfilePage() {
   const authUser = useAppSelector((session) => session.auth.user);
   const { org } = useOrganization();
 
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [sessionsStatus, setSessionsStatus] =
+    useState<SessionsStatus>('loading');
+
   const { members, viewAs } = state;
   const user: Member = members[0] ?? { ...CURRENT_USER };
   const role: RoleKey = authUser ? toRoleKey(authUser.role) : viewAs;
 
   const displayName = authUser?.name ?? user.name;
   const displayEmail = authUser?.email ?? user.email;
+
+  const currentSession = sessions?.find((session) => session.current) ?? null;
+
+  const fetchSessions = useCallback(() => {
+    setSessionsStatus('loading');
+    void listSessions()
+      .then((response) => {
+        setSessions(response.sessions);
+        setSessionsStatus('ready');
+      })
+      .catch(() => {
+        // Network/5xx — keep any previously loaded list, flag for retry.
+        setSessionsStatus('error');
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   /** This device only — same action as the sidebar Log out. */
   const handleLogout = (): void => {
@@ -80,6 +158,34 @@ export function ProfilePage() {
     })();
   };
 
+  /**
+   * One other device: optimistic removal, restore + toast on failure.
+   * The current device routes through the full logout flow instead.
+   */
+  const handleRevokeSession = (session: SessionSummary): void => {
+    if (session.current) {
+      handleLogout();
+      return;
+    }
+    const previous = sessions;
+    setSessions((list) =>
+      (list ?? []).filter((entry) => entry.id !== session.id),
+    );
+    void revokeSession(session.id)
+      .then(() => {
+        // Refresh so counts/expiry stay honest after the revoke.
+        fetchSessions();
+      })
+      .catch((error: unknown) => {
+        setSessions(previous);
+        const message =
+          error instanceof Error && error.message.length > 0
+            ? error.message
+            : "Couldn't log out that device. Please try again.";
+        show(message);
+      });
+  };
+
   useEffect(() => {
     document.title = `${displayName} · Nexus`;
   }, [displayName]);
@@ -93,6 +199,11 @@ export function ProfilePage() {
   ) : (
     <span className="font-semibold text-ink">Profile</span>
   );
+
+  const deviceCount = sessions?.length ?? 0;
+  const expires = currentSession
+    ? expiresLabel(currentSession.expiresAt)
+    : null;
 
   return (
     <AppShell
@@ -171,25 +282,63 @@ export function ProfilePage() {
                   </span>
                 }
               />
-              <Detail label="Signed in" value={sessionTime(signInTime)} />
+              <Detail
+                label="Signed in"
+                value={
+                  currentSession ? (
+                    sessionTime(new Date(currentSession.signedInAt))
+                  ) : (
+                    <span className="text-ink-soft">
+                      {sessionsStatus === 'loading' ? 'Loading…' : '—'}
+                    </span>
+                  )
+                }
+              />
               <Detail
                 label="Expires"
                 value={
-                  <span className="text-ink-soft">
-                    in ~24h (
-                    {sessionTime(
-                      new Date(signInTime.getTime() + 24 * 60 * 60 * 1000),
-                    )}
-                    )
-                  </span>
+                  expires ? (
+                    <span className="text-ink-soft">
+                      {expires.relative} ({expires.at})
+                    </span>
+                  ) : (
+                    <span className="text-ink-soft">
+                      {sessionsStatus === 'loading' ? 'Loading…' : '—'}
+                    </span>
+                  )
                 }
               />
-              <Detail label="Device" value="This device" />
+              <Detail
+                label="Device"
+                value={
+                  currentSession ? (
+                    <span>
+                      {currentSession.device}
+                      <span className="text-ink-soft">
+                        {' '}
+                        · {currentSession.browser}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="text-ink-soft">
+                      {sessionsStatus === 'loading'
+                        ? 'Loading…'
+                        : 'This device'}
+                    </span>
+                  )
+                }
+              />
             </dl>
             <div className="border-t border-ink-line bg-paper px-5 py-3 text-[13px] text-ink-soft">
               Session ID
               <span className="mx-1.5 text-ink-line">·</span>
-              <span className="font-mono">sess_8f3a2b9c41d0</span>
+              <span className="font-mono">
+                {currentSession
+                  ? `sess_${currentSession.id}`
+                  : sessionsStatus === 'loading'
+                    ? '…'
+                    : '—'}
+              </span>
             </div>
           </section>
 
@@ -207,9 +356,9 @@ export function ProfilePage() {
             </div>
             <div className="p-5">
               <p className="text-sm text-ink-soft">
-                You&apos;re signed in on {pad2(SESSIONS.length)} devices. End a
-                single device from the Active sessions list, or every session
-                below.
+                You&apos;re signed in on {pad2(deviceCount)} device
+                {deviceCount === 1 ? '' : 's'}. End a single device from the
+                Active sessions list, or every session below.
               </p>
               <button
                 type="button"
@@ -237,70 +386,110 @@ export function ProfilePage() {
               Active sessions
             </h2>
             <span className="text-[11px] font-bold uppercase tracking-wider text-ink-soft">
-              {pad2(SESSIONS.length)} devices
+              {sessionsStatus === 'ready'
+                ? `${pad2(deviceCount)} device${deviceCount === 1 ? '' : 's'}`
+                : '…'}
             </span>
           </div>
-          <ul>
-            {SESSIONS.map((session) => (
-              <li
-                key={session.id}
-                className={`flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-ink-line px-5 py-4 last:border-b-0 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_minmax(0,1.1fr)_auto] ${
-                  session.current ? 'bg-cobalt/5' : ''
-                }`}
+          {sessionsStatus === 'loading' && sessions === null ? (
+            <ul aria-busy="true">
+              {[0, 1].map((row) => (
+                <li
+                  key={row}
+                  className="flex items-center gap-5 border-b border-ink-line px-5 py-4 last:border-b-0"
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 bg-ink-soft/20" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-4 w-40 bg-ink-soft/10" />
+                    <div className="h-3 w-56 bg-ink-soft/10" />
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : sessionsStatus === 'error' && sessions === null ? (
+            <div className="px-5 py-8 text-center">
+              <p className="text-sm text-ink-soft">
+                Couldn&apos;t load your sessions. Check your connection and try
+                again.
+              </p>
+              <button
+                type="button"
+                onClick={fetchSessions}
+                className="mt-3 border border-ink px-4 py-2 text-sm font-semibold hover:bg-ink hover:text-white"
               >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span
-                    aria-hidden="true"
-                    className={`h-2.5 w-2.5 shrink-0 ${
-                      session.online ? 'bg-emerald-500' : 'bg-ink-soft/40'
-                    }`}
-                  />
+                Retry
+              </button>
+            </div>
+          ) : (
+            <ul>
+              {(sessions ?? []).map((session) => (
+                <li
+                  key={session.id}
+                  className={`flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-ink-line px-5 py-4 last:border-b-0 sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1.6fr)_minmax(0,1.1fr)_auto] ${
+                    session.current ? 'bg-cobalt/5' : ''
+                  }`}
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span
+                      aria-hidden="true"
+                      className={`h-2.5 w-2.5 shrink-0 ${
+                        session.online ? 'bg-emerald-500' : 'bg-ink-soft/40'
+                      }`}
+                    />
+                    <div className="min-w-0">
+                      <p className="flex flex-wrap items-center gap-2 font-semibold">
+                        {session.device}
+                        {session.current ? (
+                          <span className="bg-cobalt px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
+                            This device
+                          </span>
+                        ) : null}
+                      </p>
+                      <p className="truncate text-sm text-ink-soft">
+                        {session.browser}
+                      </p>
+                    </div>
+                  </div>
                   <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 font-semibold">
-                      {session.device}
-                      {session.current ? (
-                        <span className="bg-cobalt px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white">
-                          This device
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="truncate text-sm text-ink-soft">
-                      {session.browser}
+                    <p className="truncate text-sm">{session.ip}</p>
+                    <p className="truncate text-[13px] text-ink-soft">
+                      Signed in {signedInLabel(session.signedInAt)}
                     </p>
                   </div>
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate text-sm">{session.location}</p>
-                  <p className="truncate text-[13px] text-ink-soft">
-                    Signed in {session.signedInAt}
-                  </p>
-                </div>
-                <div className="text-sm sm:text-right">
-                  <span className="block text-xs font-bold uppercase tracking-wider text-ink-soft sm:hidden">
-                    Last active
-                  </span>
-                  <span
-                    className={
-                      session.online
-                        ? 'font-semibold text-emerald-700'
-                        : 'text-ink-soft'
-                    }
-                  >
-                    {session.lastActive}
-                  </span>
-                </div>
-                <div className="ml-auto sm:ml-0 sm:text-right">
-                  <button
-                    type="button"
-                    onClick={() => show(SESSION_LOGOUT_STUB_TOAST)}
-                    className="text-sm text-red-700 underline-offset-2 hover:underline"
-                  >
-                    Log out
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+                  <div className="text-sm sm:text-right">
+                    <span className="block text-xs font-bold uppercase tracking-wider text-ink-soft sm:hidden">
+                      Last active
+                    </span>
+                    <span
+                      className={
+                        session.online
+                          ? 'font-semibold text-emerald-700'
+                          : 'text-ink-soft'
+                      }
+                    >
+                      {session.current
+                        ? 'Active now'
+                        : lastActiveLabel(session.lastActiveAt)}
+                    </span>
+                  </div>
+                  <div className="ml-auto sm:ml-0 sm:text-right">
+                    <button
+                      type="button"
+                      onClick={() => handleRevokeSession(session)}
+                      className="text-sm text-red-700 underline-offset-2 hover:underline"
+                    >
+                      Log out
+                    </button>
+                  </div>
+                </li>
+              ))}
+              {(sessions ?? []).length === 0 ? (
+                <li className="px-5 py-8 text-center text-sm text-ink-soft">
+                  No active sessions found.
+                </li>
+              ) : null}
+            </ul>
+          )}
         </section>
       </div>
       {toastElement}

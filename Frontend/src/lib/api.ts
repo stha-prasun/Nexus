@@ -136,6 +136,36 @@ export function logout(
   return apiPost<LogoutResponse>('/auth/logout', options);
 }
 
+/** One device row from GET /auth/sessions — never carries the raw sid. */
+export interface SessionSummary {
+  /** Opaque public handle used to revoke this session. */
+  id: string;
+  device: string;
+  browser: string;
+  ip: string;
+  /** ISO timestamp of sign-in. */
+  signedInAt: string;
+  /** ISO timestamp of last authenticated activity. */
+  lastActiveAt: string;
+  /** ISO timestamp when this session expires. */
+  expiresAt: string;
+  online: boolean;
+  current: boolean;
+}
+
+/** Live sessions for the signed-in user: current first, then most active. */
+export function listSessions(): Promise<{ sessions: SessionSummary[] }> {
+  return apiRequest<{ sessions: SessionSummary[] }>('/auth/sessions', 'GET');
+}
+
+/** Revoke one device by its public handle. Idempotent — `revoked: 0` if gone. */
+export function revokeSession(id: string): Promise<LogoutResponse> {
+  return apiRequest<LogoutResponse>(
+    `/auth/sessions/${encodeURIComponent(id)}`,
+    'DELETE',
+  );
+}
+
 /**
  * Three-way session probe for bootstrap:
  * - `ok`        — 200, the server vouched for the cookie;

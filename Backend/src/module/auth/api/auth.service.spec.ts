@@ -79,6 +79,7 @@ describe('AuthService', () => {
     destroy: jest.fn(),
     destroyAndUnindex: jest.fn(),
     revokeAllForUser: jest.fn(),
+    listForUser: jest.fn(),
   };
   const membersRepository = {
     acceptPendingForEmail: jest.fn(),
@@ -426,6 +427,7 @@ describe('AuthService', () => {
           email: 'ada@example.com',
         },
         SESSION_TTL_SECONDS,
+        {},
       );
       expect(result).toEqual({
         user: {
@@ -451,6 +453,7 @@ describe('AuthService', () => {
       expect(sessions.create).toHaveBeenCalledWith(
         expect.anything(),
         SESSION_REMEMBER_TTL_SECONDS,
+        {},
       );
       expect(result.ttlSeconds).toBe(SESSION_REMEMBER_TTL_SECONDS);
     });
@@ -738,6 +741,203 @@ describe('AuthService', () => {
       sessions.get.mockRejectedValue(new Error('redis down'));
 
       await expect(service.me('sid1')).rejects.toThrow('redis down');
+    });
+  });
+
+  describe('listSessions', () => {
+    const currentSnapshot = {
+      userId: uuid(1),
+      role: 'Dev' as const,
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastActiveAt: '2026-01-01T00:00:00.000Z',
+      publicId: 'current12hnd',
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      ip: '10.0.0.1',
+    };
+
+    it('returns [] when the current session is gone', async () => {
+      sessions.get.mockResolvedValue(null);
+
+      expect(await service.listSessions('dead')).toEqual([]);
+      expect(sessions.listForUser).not.toHaveBeenCalled();
+    });
+
+    it('maps rows, marks current first and derives online from the window', async () => {
+      sessions.get.mockResolvedValue(currentSnapshot);
+      sessions.listForUser.mockResolvedValue([
+        {
+          sid: 'sid-other',
+          data: {
+            ...currentSnapshot,
+            publicId: 'other12hndx',
+            userAgent:
+              'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+            ip: '10.0.0.2',
+            lastActiveAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+          },
+          expiresAtMs: Date.now() + 3_600_000,
+        },
+        {
+          sid: 'sid-current',
+          data: currentSnapshot,
+          expiresAtMs: Date.now() + 86_400_000,
+        },
+      ]);
+
+      const result = await service.listSessions('sid-current');
+
+      expect(result).toHaveLength(2);
+      // Current session sorts first regardless of input order.
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          id: 'current12hnd',
+          current: true,
+          online: true,
+          ip: '10.0.0.1',
+          device: expect.any(String),
+          browser: expect.stringContaining('Chrome'),
+        }),
+      );
+      expect(result[1]).toEqual(
+        expect.objectContaining({
+          id: 'other12hndx',
+          current: false,
+          // Last active an hour ago → outside the 5-minute window.
+          online: false,
+          device: expect.stringContaining('iPhone'),
+        }),
+      );
+      expect(new Date(result[0].expiresAt).getTime()).toBeGreaterThan(
+        Date.now(),
+      );
+    });
+
+    it('falls back safely for legacy sessions without the new fields', async () => {
+      sessions.get.mockResolvedValue({
+        userId: uuid(1),
+        role: 'Dev' as const,
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
+      sessions.listForUser.mockResolvedValue([
+        {
+          sid: 'legacy'.padEnd(64, '0'),
+          data: {
+            userId: uuid(1),
+            role: 'Dev' as const,
+            name: 'Ada Lovelace',
+            email: 'ada@example.com',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+          expiresAtMs: Date.now() + 1000,
+        },
+      ]);
+
+      const result = await service.listSessions('legacy'.padEnd(64, '0'));
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).toEqual(
+        expect.objectContaining({
+          device: 'Unknown device',
+          browser: 'Unknown browser',
+          ip: 'Unknown',
+          current: true,
+          online: true,
+        }),
+      );
+    });
+  });
+
+  describe('revokeSession', () => {
+    const snapshot = {
+      userId: uuid(1),
+      role: 'Dev' as const,
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastActiveAt: '2026-01-01T00:00:00.000Z',
+      publicId: 'target12hnd',
+    };
+
+    it('revokes by publicId among the caller’s own sessions only', async () => {
+      sessions.get.mockResolvedValue(snapshot);
+      sessions.listForUser.mockResolvedValue([
+        { sid: 'sid-target', data: snapshot, expiresAtMs: Date.now() + 1000 },
+        {
+          sid: 'sid-other',
+          data: { ...snapshot, publicId: 'other12hndx' },
+          expiresAtMs: Date.now() + 1000,
+        },
+      ]);
+      sessions.destroyAndUnindex.mockResolvedValue(1);
+
+      const { result, revokedCurrent } = await service.revokeSession(
+        'sid-current',
+        'target12hnd',
+      );
+
+      expect(sessions.destroyAndUnindex).toHaveBeenCalledWith(
+        'sid-target',
+        uuid(1),
+      );
+      expect(result).toEqual({ message: LOGOUT_MESSAGE, revoked: 1 });
+      expect(revokedCurrent).toBe(false);
+    });
+
+    it('flags revokedCurrent when the caller kills their own session', async () => {
+      sessions.get.mockResolvedValue(snapshot);
+      sessions.listForUser.mockResolvedValue([
+        { sid: 'sid-self', data: snapshot, expiresAtMs: Date.now() + 1000 },
+      ]);
+      sessions.destroyAndUnindex.mockResolvedValue(1);
+
+      const { revokedCurrent } = await service.revokeSession(
+        'sid-self',
+        'target12hnd',
+      );
+
+      expect(revokedCurrent).toBe(true);
+    });
+
+    it('is idempotent for an unknown handle (revoked: 0, no writes)', async () => {
+      sessions.get.mockResolvedValue(snapshot);
+      sessions.listForUser.mockResolvedValue([
+        { sid: 'sid-a', data: snapshot, expiresAtMs: Date.now() + 1000 },
+      ]);
+
+      const { result, revokedCurrent } = await service.revokeSession(
+        'sid-current',
+        'nope',
+      );
+
+      expect(sessions.destroyAndUnindex).not.toHaveBeenCalled();
+      expect(result).toEqual({ message: LOGOUT_MESSAGE, revoked: 0 });
+      expect(revokedCurrent).toBe(false);
+    });
+
+    it('returns revoked: 0 when the current session is already gone', async () => {
+      sessions.get.mockResolvedValue(null);
+
+      const { result } = await service.revokeSession('dead', 'target12hnd');
+
+      expect(result.revoked).toBe(0);
+      expect(sessions.listForUser).not.toHaveBeenCalled();
+    });
+
+    it('resolves revoked: 0 (best-effort) on a Redis failure', async () => {
+      sessions.get.mockResolvedValue(snapshot);
+      sessions.listForUser.mockRejectedValue(new Error('redis down'));
+
+      const { result } = await service.revokeSession(
+        'sid-current',
+        'target12hnd',
+      );
+
+      expect(result).toEqual({ message: LOGOUT_MESSAGE, revoked: 0 });
     });
   });
 });

@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { UNAUTHENTICATED_MESSAGE } from '../constants/auth.constants';
-import { SESSION_COOKIE_NAME } from '../session/session.constants';
+import {
+  LAST_ACTIVE_WRITE_INTERVAL_MS,
+  SESSION_COOKIE_NAME,
+} from '../session/session.constants';
 import { SessionService } from '../session/session.service';
 import type { SessionData, SessionUser } from '../session/session.types';
 
@@ -25,8 +28,9 @@ const unauthenticated = (): UnauthorizedException =>
  * Resolves the `nexus_sid` cookie to a Redis session snapshot and attaches
  * it to `req.user`. Missing/invalid/expired/corrupt sessions → 401; Redis
  * outages propagate as 500 — a transient outage must never sign the client
- * out. Scoped to the organization controller for now (a global guard was
- * explicitly deferred in the auth plan).
+ * out. Also stamps `lastActiveAt` (throttled, fire-and-forget) so the
+ * session-list UI can show real activity — a failed stamp is logged, never
+ * fails the request.
  */
 @Injectable()
 export class SessionAuthGuard implements CanActivate {
@@ -54,6 +58,19 @@ export class SessionAuthGuard implements CanActivate {
     }
 
     request.user = session;
+    this.stampActivity(sid, session);
     return true;
+  }
+
+  /** Best-effort, throttled lastActiveAt rewrite — never blocks the request. */
+  private stampActivity(sid: string, session: SessionData): void {
+    const last = Date.parse(session.lastActiveAt ?? session.createdAt ?? '');
+    if (
+      Number.isFinite(last) &&
+      Date.now() - last < LAST_ACTIVE_WRITE_INTERVAL_MS
+    ) {
+      return;
+    }
+    void this.sessions.recordActivity(sid, session);
   }
 }

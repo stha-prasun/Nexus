@@ -77,7 +77,10 @@ describe('SessionService', () => {
       expect(JSON.parse(payload)).toEqual({
         ...user,
         createdAt: expect.any(String),
+        lastActiveAt: expect.any(String),
+        publicId: expect.any(String),
       });
+      expect(JSON.parse(payload).publicId).toHaveLength(12);
       expect(ex).toBe('EX');
       expect(ttl).toBe(SESSION_TTL_SECONDS);
 
@@ -180,6 +183,120 @@ describe('SessionService', () => {
 
       redis.expire.mockResolvedValue(0);
       expect(await service.touch('gone')).toBe(false);
+    });
+  });
+
+  describe('recordActivity', () => {
+    const snapshot = {
+      ...user,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastActiveAt: '2026-01-01T00:00:00.000Z',
+      publicId: 'abcdef123456',
+    };
+
+    it('stamps lastActiveAt and preserves the remaining TTL via PX', async () => {
+      redis.pttl.mockResolvedValue(5_000);
+      redis.set.mockResolvedValue('OK');
+
+      await service.recordActivity('abc', snapshot);
+
+      expect(redis.pttl).toHaveBeenCalledWith(sessionKey('abc'));
+      expect(redis.set).toHaveBeenCalledWith(
+        sessionKey('abc'),
+        expect.stringContaining('"lastActiveAt"'),
+        'PX',
+        5_000,
+      );
+      const written = JSON.parse(redis.set.mock.calls[0][1] as string);
+      expect(written.lastActiveAt).not.toBe(snapshot.lastActiveAt);
+      expect(written.publicId).toBe(snapshot.publicId);
+    });
+
+    it('uses a plain SET when PTTL reports no expiry (-1)', async () => {
+      redis.pttl.mockResolvedValue(-1);
+      redis.set.mockResolvedValue('OK');
+
+      await service.recordActivity('abc', snapshot);
+
+      expect(redis.set).toHaveBeenCalledWith(
+        sessionKey('abc'),
+        expect.stringContaining('"lastActiveAt"'),
+      );
+      expect(redis.set.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('is a no-op when the key vanished (-2)', async () => {
+      redis.pttl.mockResolvedValue(-2);
+
+      await service.recordActivity('gone', snapshot);
+
+      expect(redis.set).not.toHaveBeenCalled();
+    });
+
+    it('swallows Redis failures (activity must never fail a request)', async () => {
+      redis.pttl.mockRejectedValue(new Error('connection lost'));
+
+      await expect(service.recordActivity('abc', snapshot)).resolves.toBe(
+        undefined,
+      );
+      expect(log.error).toHaveBeenCalled();
+    });
+  });
+
+  describe('listForUser', () => {
+    const pipeline = () => ({
+      get: jest.fn().mockReturnThis(),
+      pttl: jest.fn().mockReturnThis(),
+      exec: jest.fn(),
+    });
+
+    it('returns [] without touching the pipeline when the index is empty', async () => {
+      redis.zrange.mockResolvedValue([]);
+
+      expect(await service.listForUser(user.userId)).toEqual([]);
+      expect(redis.pipeline).not.toHaveBeenCalled();
+    });
+
+    it('pairs GET+PTTL per sid and skips expired/corrupt entries', async () => {
+      const pipe = pipeline();
+      redis.pipeline.mockReturnValue(pipe);
+      redis.zrange.mockResolvedValue(['sidA', 'sidGone', 'sidCorrupt']);
+      const live = JSON.stringify({
+        ...user,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActiveAt: '2026-01-02T00:00:00.000Z',
+        publicId: 'aaaa11112222',
+      });
+      pipe.exec.mockResolvedValue([
+        [null, live],
+        [null, 60_000],
+        [null, null], // expired between ZRANGE and GET
+        [null, -2],
+        [null, '{not-json'],
+        [null, 30_000],
+      ]);
+
+      const listed = await service.listForUser(user.userId);
+
+      expect(pipe.get).toHaveBeenCalledWith(sessionKey('sidA'));
+      expect(pipe.pttl).toHaveBeenCalledWith(sessionKey('sidA'));
+      expect(listed).toHaveLength(1);
+      expect(listed[0]).toEqual({
+        sid: 'sidA',
+        data: expect.objectContaining({ publicId: 'aaaa11112222' }),
+        expiresAtMs: expect.any(Number),
+      });
+      expect(listed[0].expiresAtMs).toBeGreaterThan(Date.now());
+    });
+
+    it('returns [] when EXEC yields no result', async () => {
+      const pipe = pipeline();
+      redis.pipeline.mockReturnValue(pipe);
+      redis.zrange.mockResolvedValue(['sidA']);
+      pipe.exec.mockResolvedValue(null);
+
+      expect(await service.listForUser(user.userId)).toEqual([]);
+      expect(log.error).toHaveBeenCalled();
     });
   });
 

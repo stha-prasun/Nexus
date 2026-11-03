@@ -8,6 +8,18 @@ export interface SessionUser {
   email: string;
 }
 
+/** Device context captured at login for the session-list UI. */
+export interface SessionContext {
+  userAgent?: string;
+  ip?: string;
+}
+
 export interface SessionData extends SessionUser {
   createdAt: string;
+  /** Opaque, safe-to-expose handle — the raw sid never leaves the server. */
+  publicId: string;
+  /** Last time an authenticated request touched this session (ISO). */
+  lastActiveAt: string;
+  userAgent?: string;
+  ip?: string;
 }

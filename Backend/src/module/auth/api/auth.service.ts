@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import type { Redis } from 'ioredis';
+import { UAParser } from 'ua-parser-js';
 import { AppLogger } from '../../../common/logger/logger';
 import { MailQueue } from '../../mail/mail.queue';
 import {
@@ -43,16 +44,52 @@ import type { User } from './entities/user.entity';
 import { UserFactory } from './factories/user.factory';
 import { AuthRepository } from './repositories/auth.repository';
 import {
+  SESSION_ONLINE_WINDOW_MS,
   SESSION_REMEMBER_TTL_SECONDS,
   SESSION_TTL_SECONDS,
 } from './session/session.constants';
 import { SessionService } from './session/session.service';
-import type { SessionData, SessionUser } from './session/session.types';
+import type {
+  SessionContext,
+  SessionData,
+  SessionUser,
+} from './session/session.types';
 
 const isUniqueViolation = (error: unknown): boolean =>
   typeof error === 'object' &&
   error !== null &&
   (error as { code?: unknown }).code === '23505';
+
+/** Short human label for the device column ("Windows PC", "iPhone"). */
+const describeDevice = (userAgent?: string): string => {
+  if (userAgent === undefined || userAgent.length === 0)
+    return 'Unknown device';
+  const { device, os } = new UAParser(userAgent).getResult();
+  const model = device.model?.trim();
+  if (model !== undefined && model.length > 0) return model;
+  const osName = os.name?.trim();
+  if (osName === undefined || osName.length === 0) return 'Unknown device';
+  if (osName === 'iOS') return 'iPhone/iPad';
+  if (osName === 'Android') return 'Android device';
+  return `${osName} device`;
+};
+
+/** Short human label for the browser column ("Chrome on Windows"). */
+const describeBrowser = (userAgent?: string): string => {
+  if (userAgent === undefined || userAgent.length === 0)
+    return 'Unknown browser';
+  const { browser, os } = new UAParser(userAgent).getResult();
+  const browserName = browser.name?.trim();
+  const osName = os.name?.trim();
+  if (browserName === undefined || browserName.length === 0) {
+    return osName !== undefined && osName.length > 0
+      ? `Unknown browser on ${osName}`
+      : 'Unknown browser';
+  }
+  return osName !== undefined && osName.length > 0
+    ? `${browserName} on ${osName}`
+    : browserName;
+};
 
 /** Public user shape returned by login/me — never carries passwordHash. */
 export interface AuthUser {
@@ -73,6 +110,20 @@ export type LogoutResult = { message: string; revoked: number };
 export type MeResult =
   | { status: 'authenticated'; user: AuthUser }
   | { status: 'unauthenticated' };
+
+/** One row of GET /auth/sessions — safe-to-expose (no raw sid). */
+export interface SessionListItem {
+  /** Opaque public handle used to revoke this session. */
+  id: string;
+  device: string;
+  browser: string;
+  ip: string;
+  signedInAt: string;
+  lastActiveAt: string;
+  expiresAt: string;
+  online: boolean;
+  current: boolean;
+}
 
 /**
  * Auth orchestration: registration + email-confirmation (honest 409s on
@@ -185,7 +236,11 @@ export class AuthService {
    * index session (MULTI, inspected) → best-effort rotate out the old sid.
    * `currentSid` is the pre-login cookie, if any (fixation defense).
    */
-  async login(dto: LoginDto, currentSid?: string): Promise<LoginResult> {
+  async login(
+    dto: LoginDto,
+    currentSid?: string,
+    context: SessionContext = {},
+  ): Promise<LoginResult> {
     const key = loginLockoutKey(dto.email);
     const failures = await this.redis.get(key);
     if (failures !== null && Number(failures) >= LOGIN_LOCKOUT_MAX) {
@@ -234,7 +289,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
     };
-    const sid = await this.sessions.create(snapshot, ttlSeconds);
+    const sid = await this.sessions.create(snapshot, ttlSeconds, context);
 
     // Fixation defense: the pre-login sid is never reused. Best-effort —
     // a failed destroy lives to TTL but stays indexed for revoke-all.
@@ -293,6 +348,93 @@ export class AuthService {
       return { status: 'unauthenticated' };
     }
     return { status: 'authenticated', user: this.toAuthUser(session) };
+  }
+
+  /**
+   * Device list for GET /auth/sessions: every live session for the user,
+   * current one first, then most recently active. `online` = current OR
+   * last active within SESSION_ONLINE_WINDOW_MS. Only the caller's own
+   * sessions are ever read (the index is keyed by userId).
+   */
+  async listSessions(currentSid: string): Promise<SessionListItem[]> {
+    const session = await this.readSession(currentSid);
+    if (session === null) return [];
+
+    const listed = await this.sessions.listForUser(session.userId);
+    const nowMs = Date.now();
+
+    const items = listed.map((entry) => {
+      const lastActiveMs = Date.parse(
+        entry.data.lastActiveAt ?? entry.data.createdAt,
+      );
+      const isCurrent = entry.sid === currentSid;
+      return {
+        id: entry.data.publicId ?? entry.sid.slice(0, 12),
+        device: describeDevice(entry.data.userAgent),
+        browser: describeBrowser(entry.data.userAgent),
+        ip: entry.data.ip ?? 'Unknown',
+        signedInAt: entry.data.createdAt,
+        lastActiveAt: entry.data.lastActiveAt ?? entry.data.createdAt,
+        expiresAt: new Date(entry.expiresAtMs).toISOString(),
+        online:
+          isCurrent ||
+          (Number.isFinite(lastActiveMs) &&
+            nowMs - lastActiveMs < SESSION_ONLINE_WINDOW_MS),
+        current: isCurrent,
+      };
+    });
+
+    // Current session first, then the service's activity ordering.
+    items.sort((a, b) => Number(b.current) - Number(a.current));
+    return items;
+  }
+
+  /**
+   * Revoke one session by its public handle. Ownership is enforced by
+   * construction: the publicId is resolved only among the caller's own
+   * indexed sids, so a foreign handle simply misses. Idempotent — an unknown
+   * or already-dead handle returns revoked: 0 (same posture as logout).
+   * Returns whether the caller revoked their own current session so the
+   * controller can clear the cookie.
+   */
+  async revokeSession(
+    currentSid: string,
+    publicId: string,
+  ): Promise<{ result: LogoutResult; revokedCurrent: boolean }> {
+    const message = LOGOUT_MESSAGE;
+    const empty = {
+      result: { message, revoked: 0 },
+      revokedCurrent: false,
+    };
+
+    const session = await this.readSession(currentSid);
+    if (session === null) return empty;
+
+    try {
+      const listed = await this.sessions.listForUser(session.userId);
+      const target = listed.find(
+        (entry) =>
+          entry.data.publicId === publicId ||
+          // Legacy sessions minted before publicId existed: fall back to a
+          // sid-prefix handle so old rows stay revocable from the UI.
+          (entry.data.publicId === undefined && entry.sid.startsWith(publicId)),
+      );
+      if (target === undefined) return empty;
+
+      const revoked = await this.sessions.destroyAndUnindex(
+        target.sid,
+        session.userId,
+      );
+      return {
+        result: { message, revoked },
+        revokedCurrent: target.sid === currentSid,
+      };
+    } catch (error) {
+      this.log.error('revoke session redis write failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return empty;
+    }
   }
 
   /** A corrupt payload is not an authentication verdict — just a dead key. */
