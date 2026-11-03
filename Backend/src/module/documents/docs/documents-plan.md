@@ -1,9 +1,11 @@
 # Documents Upload — Implementation Plan
 
 > Project documents for projects: **Admin, PM and project Lead Dev may upload;
-> everyone who can see the project may view/download.** Files live in MinIO;
-> metadata in Postgres. Validation covers MIME type, file size, extension and
-> filename (plus content sniffing). **No commits, no pushes** during this work.
+> everyone who can see the project may view/download.** Files live in MinIO,
+> any S3, or the server's own disk (`/uploads`) per `STORAGE_DRIVER` — built by
+> `storage-plan.md`; metadata in Postgres. Validation covers MIME type, file
+> size, extension and filename (plus content sniffing). **No commits, no
+> pushes** during this work.
 
 ---
 
@@ -14,7 +16,8 @@
 | View/download | `canSee`: **Admin + HR see all projects, members see their own** (mirrors `TasksPolicy.canSee`); non-member → **404** (no existence leak) |
 | Upload | `canManage`: **Admin any project; PM or project Lead only when a member** (exactly `TasksPolicy.canManage`); visible-but-forbidden → **403 `role_forbidden`** |
 | Delete | Same matrix as upload |
-| Download | **Presigned MinIO GET**, 5-min TTL, issued only after authz |
+| Download | **Presigned GET** (minio/s3) or the guarded **local content route** (`local`); 5-min TTL applies to presigned only; issued only after authz |
+| Storage | Three drivers (`minio\|s3\|local`) via `STORAGE_DRIVER` env — built by `storage-plan.md` |
 | File rules | Frontend extension list, **25 MB**, extension→MIME allowlist, **magic-byte sniffing**, sanitized filename |
 | SVG | Allowed, but **always served as `attachment`** (no inline script execution) |
 
@@ -59,16 +62,22 @@ documents
 ```
 
 - Immutable rows — no `updated_at`, no update endpoint.
-- Delete removes the MinIO object **and** the row (hard delete).
+- Delete removes the storage object (driver-agnostic — MinIO/S3 object or
+  the `/uploads` file) **and** the row (hard delete).
 - `uploaded_by_user_id` cascades like `project_members.user_id` (users are
   not hard-deleted in this app).
 
-**MinIO layout**
+**Storage layout** (see `storage-plan.md`)
 
-- Bucket: `nexus-documents` (private, created on module init if missing —
-  ignore `BucketAlreadyOwnedByYou`).
+- **Remote (minio/s3):** bucket `env('STORAGE_BUCKET', 'nexus-documents')`
+  (private, created on module init if missing — ignore
+  `BucketAlreadyOwnedByYou`).
+- **Local:** files land at `<STORAGE_LOCAL_DIR>/<object-key>` (default
+  `Backend/uploads`); `uploads/` is gitignored and **never** served
+  statically — only via the guarded content route (§4).
 - Object key: `projects/<projectId>/<uuidv4>.<ext>` — the original filename
-  **never** touches the storage path.
+  **never** touches the storage path (identical scheme for all three
+  drivers).
 - Original name kept only in `documents.original_name` (display +
   Content-Disposition).
 
@@ -84,7 +93,8 @@ Backend/src/module/documents/
 │   ├── constants/                      ← documents.constants.ts:
 │   │                                        ALLOWED_EXTENSIONS, EXTENSION_MIME_MAP,
 │   │                                        MAX_FILE_BYTES (25 MB), MAGIC signatures,
-│   │                                        bucket name, presign TTL, error codes
+│   │                                        error codes (bucket name + presign TTL
+│   │                                        live in storage/config — storage-plan.md)
 │   ├── dto/                            ← documents-responses.dto.ts:
 │   │                                        DocumentResponseDto, ListDocumentsResponseDto,
 │   │                                        DownloadUrlResponseDto + toX mappers
@@ -94,11 +104,12 @@ Backend/src/module/documents/
 │   ├── repositories/                   ← documents.repository.ts (+spec)
 │   ├── policies/                       ← documents.policy.ts: canSee / canManage
 │   │                                        (mirror of tasks.policy)
-│   ├── storage/                        ← minio.storage.ts: ensureBucket, put, presign,
-│   │                                        remove (+spec)
+│   ├── storage/                        ← documents.storage.ts: object-key scheme
+│   │                                        + SVG/disposition policy; delegates I/O
+│   │                                        to StorageService (+spec)
 │   ├── validation/                     ← file.validator.ts: pure functions — ext, mime,
 │   │                                        magic bytes, filename (+spec)
-│   ├── documents.module.ts             (+ JSDoc; deps: DatabaseModule, AuthModule, MinioModule)
+│   ├── documents.module.ts             (+ JSDoc; deps: DatabaseModule, AuthModule, StorageModule)
 │   ├── documents.controller.ts         (+spec)
 │   └── documents.service.ts            (+spec)
 └── docs/documents-plan.md              ← this plan
@@ -112,20 +123,18 @@ Backend/src/module/documents/
   `ProjectScope`) as they earn a place; empty until then.
 - Replace empty `entities/document.entity.ts` stub with a real domain class.
 
-**MinIO client:** today the `MINIO_CLIENT` provider lives inside
-`HealthModule` (a probe module — wrong home). Move the factory to a new leaf
-`Backend/src/module/minio/minio.module.ts` mirroring `redis.module.ts`
-(exports `MINIO_CLIENT`); `HealthModule` then imports `MinioModule` instead of
-defining the client. Verify `common/tracing/instrumentation.service.ts`
-minio patching still applies (if it patches `Client.prototype`, zero change;
-if it patches the instance, re-point it).
+**Storage client:** the leaf is `Backend/src/module/storage/` (aws-sdk,
+three drivers, health/tracing migration) — built entirely by
+`storage-plan.md`. Documents only ever sees `StorageService`; the old idea of
+moving `MINIO_CLIENT` out of `HealthModule` into a `minio` module is
+superseded by that plan.
 
 **Fix:** `app.module.ts` import → `'./module/documents/api/documents.module'`
 (currently broken: `'./documents/documents.module'` — typecheck fails).
 
 Dependency direction (documented in module JSDoc, like `TasksModule`):
-`DocumentsModule → DatabaseModule, AuthModule, MinioModule` — nothing imports
-DocumentsModule except `AppModule`.
+`DocumentsModule → DatabaseModule, AuthModule, StorageModule` — nothing
+imports DocumentsModule except `AppModule`.
 
 ---
 
@@ -139,7 +148,8 @@ tasks). `req.user` is the `SessionUser` session snapshot.
 |---|---|
 | `GET /projects/:projectId/documents` | `{ documents: [...] }`, newest-first, uploader resolved via join |
 | `POST /projects/:projectId/documents` | multipart field `file`, exactly one file; **201** `{ document }` |
-| `GET /projects/:projectId/documents/:documentId/download` | `{ url, expiresInSeconds: 300 }` presigned GET |
+| `GET /projects/:projectId/documents/:documentId/download` | **200 JSON** `{ url, expiresInSeconds }` — minio/s3: absolute presigned URL + `300`; `local`: relative `/api/v1/.../download/content` path + `0` |
+| `GET /projects/:projectId/documents/:documentId/download/content` | Streams the file — **`local` driver only** (else 404); fully guarded like every route; missing file on disk → 404 `document_file_missing` |
 | `DELETE /projects/:projectId/documents/:documentId` | **200** `{ message, deleted: 1 }`; missing → 404 `document_not_found` |
 
 Service flow per request:
@@ -149,7 +159,9 @@ Service flow per request:
    false → **404**.
 2. Mutations (upload/delete) then `policy.canManage(actor)` false →
    **403** `role_forbidden`.
-3. Download issues a presigned URL only after step 1.
+3. Download resolves a URL via `StorageService.resolveDownload` only after
+   step 1; the `download/content` route (local driver) re-runs the guards +
+   `requireVisible` on its own request.
 
 Response DTO fields (via `documents-responses.dto.ts` mappers, entities never
 serialized raw): `id`, `name` (original_name), `size`, `extension`,
@@ -205,13 +217,16 @@ tested — called by the service after multer:
      files), cap at 200 chars, never empty (fallback `document.<ext>`).
    - Stored as `original_name`; **object key is a random UUID** regardless.
 
-**SVG:** stored normally; the download presign always adds
-`response-content-disposition: attachment` for `.svg`. Other types:
+**SVG:** stored normally; downloads for `.svg` always carry
+`Content-Disposition: attachment` — applied as the presigned
+`ResponseContentDisposition` param (minio/s3) or the response header
+(`local`, set by the controller from the same policy). Other types:
 `inline; filename="<sanitized original>"` (filename RFC 5987-encoded).
 
 **Streaming note:** multer `memoryStorage` buffers ≤ 25 MB in RAM per
-concurrent upload — acceptable at current scale; direct streaming to MinIO
-flagged as a future optimization (not in scope).
+concurrent upload — the intake is shared by **all three drivers**
+(`storage-plan.md` §5); direct streaming to storage flagged as a future
+optimization (not in scope).
 
 ---
 
@@ -230,7 +245,9 @@ flagged as a future optimization (not in scope).
     `{ status, message }` body (413/415/400).
   - Optimistic delete with rollback + toast on failure (existing TODO:
     `DELETE /projects/:id/documents/:docId`).
-  - Download opens the presigned URL (`window.open` / `<a href>`).
+  - Download opens `url` as-is when absolute (presigned), else resolves the
+    relative content path against the API base:
+    `new URL(url, API_BASE)` — one code path for all three drivers.
   - `canUpload = Admin || (isMember && (PM || isLead))` — replaces the
     current looser rule (`Admin || isMember`).
 - **`Frontend/src/lib/documents.ts`**
@@ -246,8 +263,11 @@ flagged as a future optimization (not in scope).
 
 ## §7 Security checklist
 
-- Private bucket; no public/policy-based access — objects reachable only
-  via short-TTL presigned URLs issued after authz.
+- Remote objects: private bucket, no public/policy-based access — reachable
+  only via short-TTL presigned URLs issued after authz. Local files:
+  `/uploads` is **never** served statically — only via the guarded
+  `download/content` route, with a path-traversal check under the uploads
+  dir (`storage-plan.md` §5).
 - 404-for-invisible (no existence leak); 403 `role_forbidden` for
   visible-but-forbidden.
 - Server never trusts client MIME/extension — content is sniffed.
@@ -259,7 +279,8 @@ flagged as a future optimization (not in scope).
   per-route limit noted as a follow-up, not in scope).
 - Error bodies follow the repo convention `{ status: 'snake_case_code',
   message }`.
-- No secrets in URLs beyond the signed GET itself; presign TTL = 300 s.
+- No secrets in URLs beyond the signed GET itself; presign TTL =
+  `STORAGE_PRESIGN_TTL_SECONDS` (300 s).
 
 ---
 
@@ -275,11 +296,13 @@ flagged as a future optimization (not in scope).
   (§1) as data-driven cases.
 - **`documents.service.spec.ts`** — 404 invisible / 403 forbidden flows;
   upload happy path (storage + repository mocked); delete removes object
-  then row; download presigns only after `requireVisible`; multer error
-  mapping.
+  then row; download resolves URL only after `requireVisible` (mock
+  `StorageService.resolveDownload`); multer error mapping.
 - **`documents.controller.spec.ts`** — guards present on every route
-  (`SessionAuthGuard`, `ActiveMemberGuard`); response shapes; 413 mapping
-  for `LIMIT_FILE_SIZE`.
+  (`SessionAuthGuard`, `ActiveMemberGuard`); response shapes incl. the
+  download JSON contract for all three drivers + `download/content`
+  (404 when driver ≠ `local`, stream headers when `local`, 404
+  `document_file_missing`); 413 mapping for `LIMIT_FILE_SIZE`.
 - **`documents.repository.spec.ts`** — list/scope/find queries (follow the
   existing repo-spec mocking pattern).
 
@@ -296,8 +319,10 @@ Verification commands (both sides, before finishing):
    import path.
 2. Constants + policy + entity + factory (+ specs).
 3. Schema `documents.ts` + `schema/index.ts` export + `npm run db:generate`.
-4. Minio leaf module (move factory out of `HealthModule`) + storage service
-   (+ spec).
+4. Storage leaf module per **`storage-plan.md` §11** (install aws-sdk →
+   `module/storage/` → health + tracing migration → uninstall `minio`) —
+   must land before step 6 (documents service/controller depend on
+   `StorageService`).
 5. File validator (+ spec).
 6. Repository → service → controller → response DTOs (+ specs).
 7. Frontend: `api.ts` → `ProjectDocumentsPage` rewire → tabs count.
@@ -311,9 +336,10 @@ Verification commands (both sides, before finishing):
 
 - Per-route stricter rate limit on upload (global throttler applies today).
 - Virus scanning — interface stub only if requested later.
-- Direct streaming of large uploads to MinIO (memoryStorage is enough at
-  current scale).
+- Direct streaming of large uploads to storage (memoryStorage is enough at
+  current scale; see `storage-plan.md` §12).
 - Folders/nested organization inside a project's documents.
 - Document versioning / editing (rows are immutable).
 - Public/share links outside the app (presigned URLs are short-lived and
-  only issued to authorized sessions).
+  only issued to authorized sessions; local content URLs are session-guarded,
+  never presigned).
