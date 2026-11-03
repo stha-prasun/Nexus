@@ -1,3 +1,4 @@
+export * from './documents';
 export * from './notifications';
 export * from './organization-members';
 export * from './organizations';
