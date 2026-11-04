@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../../auth/api/auth.module';
 import { DatabaseModule } from '../../database/database.module';
+import { MembersModule } from '../../members/api/members.module';
 import { StorageModule } from '../../storage/storage.module';
 import { DocumentsController } from './documents.controller';
 import { DocumentsService } from './documents.service';
@@ -15,12 +16,13 @@ import { DocumentsStorage } from './storage/documents.storage';
  * behind `StorageService`; metadata in Postgres (`documents` table).
  *
  * One-way dependencies (documented like TasksModule):
- * `DocumentsModule → DatabaseModule, AuthModule, StorageModule` — nothing
- * imports DocumentsModule except `AppModule`. No cycle: StorageModule is a
- * leaf (storage-plan.md §3).
+ * `DocumentsModule → DatabaseModule, AuthModule, MembersModule, StorageModule`
+ * — MembersModule only for `ActiveMemberGuard` on the routes; nothing imports
+ * DocumentsModule except `AppModule`. No cycle: StorageModule is a leaf
+ * (storage-plan.md §3) and MembersModule never imports this module.
  */
 @Module({
-  imports: [AuthModule, DatabaseModule, StorageModule],
+  imports: [AuthModule, DatabaseModule, MembersModule, StorageModule],
   controllers: [DocumentsController],
   providers: [
     DocumentsService,
