@@ -14,7 +14,17 @@ import { Avatar } from '@/components/dashboard/OrgView';
 import { ProjectTabs } from '@/components/dashboard/ProjectTabs';
 import { Skeleton } from '@/components/dashboard/Skeleton';
 import { useToast } from '@/components/dashboard/Toast';
-import { ApiError, getProject, logout, type Project } from '@/lib/api';
+import {
+  API_BASE,
+  ApiError,
+  deleteProjectDocument,
+  getDocumentDownloadUrl,
+  getProject,
+  listProjectDocuments,
+  logout,
+  type Project,
+  uploadProjectDocument,
+} from '@/lib/api';
 import { BTN, CURRENT_USER, pad2, ROLES, toRoleKey } from '@/lib/dashboard';
 import {
   ALLOWED,
@@ -23,8 +33,8 @@ import {
   fmtSize,
   MAX_MB,
   type ProjectDoc,
-  seedDocs,
   TYPE_COLORS,
+  toProjectDoc,
   type UploadingDoc,
 } from '@/lib/documents';
 import { useAppDispatch, useAppSelector, useOrganization } from '@/store/hooks';
@@ -144,10 +154,14 @@ export function ProjectDocumentsPage() {
   >('loading');
   const [error, setError] = useState<string[]>([]);
   const [docs, setDocs] = useState<ProjectDoc[]>([]);
+  const [docsStatus, setDocsStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
+  const [docsError, setDocsError] = useState<string[]>([]);
+  /** Bumped by Retry — the fetch effect keys off it. */
+  const [docsNonce, setDocsNonce] = useState(0);
   const [uploading, setUploading] = useState<UploadingDoc[]>([]);
   const [docQuery, setDocQuery] = useState('');
-  /** Upload-simulation intervals — cleared on unmount so none outlive the page. */
-  const timersRef = useRef<number[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -190,22 +204,6 @@ export function ProjectDocumentsPage() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    return () => {
-      for (const timer of timersRef.current) window.clearInterval(timer);
-    };
-  }, []);
-
-  // Demo seed follows the roster — same adjustment-during-render pattern the
-  // board page uses when the route id (or store catch-up) changes.
-  const seededFor = useRef<string | null>(null);
-  if (project && seededFor.current !== project.id) {
-    seededFor.current = project.id;
-    setDocs(seedDocs(project.members));
-    setUploading([]);
-    setDocQuery('');
-  }
-
   const viewerId = authUser?.id ?? null;
   const actorRole = authUser?.role;
   const members = project?.members ?? [];
@@ -214,13 +212,42 @@ export function ProjectDocumentsPage() {
   const isLead =
     viewerId !== null &&
     members.some((member) => member.userId === viewerId && member.isLead);
-  // Mirror the server policy: Admin, or a PM who sits on the project.
-  const canManage = actorRole === 'Admin' || (actorRole === 'PM' && isMember);
-  // Design's canUpload(): everyone on the project (HR never reaches this page).
-  const canUpload = actorRole === 'Admin' || isMember;
-  // Design's canDeleteDoc(): owner/manager, lead, or whoever uploaded it.
-  const canDeleteDoc = (doc: ProjectDoc): boolean =>
-    canManage || isLead || doc.byUserId === viewerId;
+  // Mirror DocumentsPolicy.canManage: Admin, or a PM/lead on the project.
+  const canManage =
+    actorRole === 'Admin' || (isMember && (actorRole === 'PM' || isLead));
+  const canUpload = canManage;
+  const projectId = project?.id ?? id ?? null;
+
+  /** Real document list — gated on the project load so 401/404 never race it. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: docsNonce is a retry bump — it must re-run the fetch without being read inside.
+  useEffect(() => {
+    if (status !== 'ready' || !projectId || actorRole === 'HR') return;
+    let cancelled = false;
+    setDocsStatus('loading');
+    setDocsError([]);
+    listProjectDocuments(projectId)
+      .then(({ documents }) => {
+        if (cancelled) return;
+        setDocs(documents.map(toProjectDoc));
+        setDocsStatus('ready');
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          dispatch(setAnonymous());
+          return;
+        }
+        setDocsStatus('error');
+        setDocsError(
+          err instanceof ApiError
+            ? err.messages
+            : ['Something went wrong. Please try again.'],
+        );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, projectId, actorRole, docsNonce, dispatch]);
 
   useEffect(() => {
     document.title = project
@@ -243,9 +270,6 @@ export function ProjectDocumentsPage() {
       navigate('/', { replace: true });
     })();
   };
-
-  const memberByUserId = (userId: string): string =>
-    members.find((member) => member.userId === userId)?.name ?? 'Unknown';
 
   const typeBadge = (name: string): ReactNode => {
     const ext = extOf(name);
@@ -283,9 +307,10 @@ export function ProjectDocumentsPage() {
   const openFilePicker = (): void => fileInputRef.current?.click();
 
   const addFiles = (list: FileList | null): void => {
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0 || !projectId) return;
     setDocQuery('');
     const skipped: string[] = [];
+    const jobs: Promise<void>[] = [];
     Array.from(list).forEach((file, index) => {
       const ext = extOf(file.name);
       if (!(ALLOWED as readonly string[]).includes(ext)) {
@@ -303,33 +328,34 @@ export function ProjectDocumentsPage() {
         ...prev,
         { id: uploadId, name: file.name, size: file.size, progress: 0 },
       ]);
-      // Demo progress. Replace with a real upload that reports progress.
-      let progress = 0;
-      const timer = window.setInterval(() => {
-        progress = Math.min(100, progress + 12 + Math.random() * 18);
-        if (progress >= 100) {
-          window.clearInterval(timer);
-          timersRef.current = timersRef.current.filter((t) => t !== timer);
-          setUploading((prev) => prev.filter((row) => row.id !== uploadId));
-          setDocs((prev) => [
-            {
-              id: uploadId,
-              name: file.name,
-              byUserId: viewerId ?? '',
-              size: file.size,
-              at: new Date().toISOString(),
-              url: URL.createObjectURL(file),
-            },
-            ...prev,
-          ]);
-          return;
-        }
-        setUploading((prev) =>
-          prev.map((row) => (row.id === uploadId ? { ...row, progress } : row)),
-        );
-      }, 120);
-      timersRef.current.push(timer);
+      jobs.push(
+        uploadProjectDocument(projectId, file, (percent) => {
+          setUploading((prev) =>
+            prev.map((row) =>
+              row.id === uploadId ? { ...row, progress: percent } : row,
+            ),
+          );
+        })
+          .then(({ document }) => {
+            setDocs((prev) => [toProjectDoc(document), ...prev]);
+          })
+          .catch((err: unknown) => {
+            if (err instanceof ApiError && err.status === 401) {
+              dispatch(setAnonymous());
+              return;
+            }
+            show(
+              err instanceof ApiError
+                ? `${file.name}: ${err.messages.join(' ')}`
+                : `${file.name}: Something went wrong. Please try again.`,
+            );
+          })
+          .finally(() => {
+            setUploading((prev) => prev.filter((row) => row.id !== uploadId));
+          }),
+      );
     });
+    void Promise.all(jobs);
     if (skipped.length > 0) {
       show(
         skipped[0] +
@@ -340,20 +366,35 @@ export function ProjectDocumentsPage() {
     }
   };
 
+  /** Ticket first, then navigate — one path for presigned and local URLs. */
   const handleDownload = (doc: ProjectDoc): void => {
-    if (!doc.url) {
-      show('Sample document: there is nothing to download in the demo');
-      return;
-    }
-    const anchor = document.createElement('a');
-    anchor.href = doc.url;
-    anchor.download = doc.name;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+    if (!projectId) return;
+    void (async () => {
+      try {
+        const { url } = await getDocumentDownloadUrl(projectId, doc.id);
+        const anchor = document.createElement('a');
+        // Absolute (presigned) passes through; relative resolves against
+        // the API base — works for all three storage drivers.
+        anchor.href = new URL(url, API_BASE).href;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          dispatch(setAnonymous());
+          return;
+        }
+        show(
+          err instanceof ApiError
+            ? err.messages.join(' ')
+            : "Can't reach the server. Please try again shortly.",
+        );
+      }
+    })();
   };
 
   const handleDeleteDoc = async (doc: ProjectDoc): Promise<void> => {
+    if (!projectId) return;
     const confirmed = await ask({
       title: 'Delete this document?',
       ok: 'Delete document',
@@ -366,17 +407,93 @@ export function ProjectDocumentsPage() {
       ),
     });
     if (!confirmed) return;
-    if (doc.url) URL.revokeObjectURL(doc.url);
+    const before = docs;
     setDocs((prev) => prev.filter((item) => item.id !== doc.id));
-    show('Document deleted'); // TODO: DELETE /projects/:id/documents/:docId
+    try {
+      await deleteProjectDocument(projectId, doc.id);
+      show('Document deleted');
+    } catch (err) {
+      setDocs(before);
+      if (err instanceof ApiError && err.status === 401) {
+        dispatch(setAnonymous());
+        return;
+      }
+      show(
+        err instanceof ApiError
+          ? err.messages.join(' ')
+          : "Couldn't delete the document. Please try again.",
+      );
+    }
   };
 
   const docsBody = (): ReactNode => {
+    if (docsStatus === 'loading') {
+      return (
+        <div
+          role="status"
+          aria-label="Loading documents"
+          className="border border-ink"
+        >
+          <div className="hidden grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px] gap-x-4 border-b border-ink bg-paper px-4 py-2 sm:grid">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-3 w-14" />
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+          <ul>
+            {[0, 1, 2].map((row) => (
+              <li
+                key={row}
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 border-b border-ink-line px-4 py-3 last:border-b-0 sm:grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px]"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <Skeleton className="h-10 w-10 shrink-0" />
+                  <Skeleton className="h-4 w-44" />
+                </div>
+                <div className="hidden sm:block">
+                  <Skeleton className="h-4 w-28" />
+                </div>
+                <div className="hidden sm:block">
+                  <Skeleton className="h-3.5 w-12" />
+                </div>
+                <div className="hidden sm:block">
+                  <Skeleton className="h-3.5 w-12" />
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Skeleton className="h-3.5 w-16" />
+                  <Skeleton className="h-3.5 w-12" />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
+    if (docsStatus === 'error') {
+      return (
+        <div className="flex flex-col items-center gap-3 border border-dashed border-ink-line px-6 py-10 text-center">
+          <p className="text-sm font-semibold text-ink">
+            Couldn&apos;t load the documents.
+          </p>
+          <p className="max-w-sm text-sm text-ink-soft">
+            {docsError.join(' ')}
+          </p>
+          <button
+            type="button"
+            onClick={() => setDocsNonce((nonce) => nonce + 1)}
+            className="bg-cobalt px-4 py-2 text-sm font-semibold text-white hover:bg-cobalt-dark"
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
     const empty = docs.length === 0 && uploading.length === 0;
     if (empty && !canUpload) {
       return (
         <p className="border border-dashed border-ink-line p-8 text-center text-sm text-ink-soft">
-          No documents yet. People on the project can upload them here.
+          No documents yet. Admins, PMs and project leads can upload them here.
         </p>
       );
     }
@@ -461,56 +578,50 @@ export function ProjectDocumentsPage() {
 
     const noMatch =
       docs.length > 0 && shownDocs.length === 0 && uploading.length === 0;
-    const docRows = shownDocs.map((doc) => {
-      const uploader = members.find((member) => member.userId === doc.byUserId);
-      return (
-        <li
-          key={doc.id}
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 hover:bg-paper/70 sm:grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px]"
-        >
-          <div className="flex min-w-0 items-center gap-3">
-            {typeBadge(doc.name)}
-            <div className="min-w-0">
-              <p className="truncate font-semibold">{highlight(doc.name)}</p>
-              <p className="truncate text-xs text-ink-soft sm:hidden">
-                {fmtSize(doc.size)} · {memberByUserId(doc.byUserId)} ·{' '}
-                {fmtDate(doc.at)}
-              </p>
-            </div>
+    const docRows = shownDocs.map((doc) => (
+      <li
+        key={doc.id}
+        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 border-b border-ink-line px-4 py-3 last:border-b-0 hover:bg-paper/70 sm:grid-cols-[minmax(0,2.4fr)_minmax(0,1.4fr)_70px_70px_150px]"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          {typeBadge(doc.name)}
+          <div className="min-w-0">
+            <p className="truncate font-semibold">{highlight(doc.name)}</p>
+            <p className="truncate text-xs text-ink-soft sm:hidden">
+              {fmtSize(doc.size)} · {doc.byName} · {fmtDate(doc.at)}
+            </p>
           </div>
-          <div className="hidden min-w-0 items-center gap-2 text-sm sm:flex">
-            {uploader ? (
-              <Avatar name={uploader.name} size="h-6 w-6 text-[9px]" />
-            ) : null}
-            <span className="truncate">{uploader?.name ?? 'Unknown'}</span>
-          </div>
-          <span className="hidden text-sm text-ink-soft sm:block">
-            {fmtDate(doc.at)}
-          </span>
-          <span className="hidden text-sm text-ink-soft sm:block">
-            {fmtSize(doc.size)}
-          </span>
-          <div className="flex items-center justify-end gap-4 text-sm">
+        </div>
+        <div className="hidden min-w-0 items-center gap-2 text-sm sm:flex">
+          <Avatar name={doc.byName} size="h-6 w-6 text-[9px]" />
+          <span className="truncate">{doc.byName}</span>
+        </div>
+        <span className="hidden text-sm text-ink-soft sm:block">
+          {fmtDate(doc.at)}
+        </span>
+        <span className="hidden text-sm text-ink-soft sm:block">
+          {fmtSize(doc.size)}
+        </span>
+        <div className="flex items-center justify-end gap-4 text-sm">
+          <button
+            type="button"
+            onClick={() => handleDownload(doc)}
+            className="font-semibold text-cobalt underline-offset-2 hover:underline"
+          >
+            Download
+          </button>
+          {canManage ? (
             <button
               type="button"
-              onClick={() => handleDownload(doc)}
-              className="font-semibold text-cobalt underline-offset-2 hover:underline"
+              onClick={() => void handleDeleteDoc(doc)}
+              className="text-ink-soft underline-offset-2 hover:text-red-600 hover:underline"
             >
-              Download
+              Delete
             </button>
-            {canDeleteDoc(doc) ? (
-              <button
-                type="button"
-                onClick={() => void handleDeleteDoc(doc)}
-                className="text-ink-soft underline-offset-2 hover:text-red-600 hover:underline"
-              >
-                Delete
-              </button>
-            ) : null}
-          </div>
-        </li>
-      );
-    });
+          ) : null}
+        </div>
+      </li>
+    ));
 
     const table = noMatch ? (
       <p
@@ -672,15 +783,15 @@ export function ProjectDocumentsPage() {
                 {pad2(docs.length)}
               </span>
             </h2>
-            {canUpload ? (
+            {canUpload && docsStatus === 'ready' ? (
               <button type="button" onClick={openFilePicker} className={BTN}>
                 Upload files
               </button>
             ) : null}
           </div>
           <p className="mb-3 text-sm text-ink-soft">
-            Shared with everyone on this project. Members can upload. The owner,
-            the lead and whoever uploaded a file can delete it.
+            Shared with everyone on this project. Admins, PMs and project leads
+            can upload and delete files.
           </p>
           <div
             className={`mb-3 flex flex-wrap items-center gap-3 ${docs.length === 0 ? 'hidden' : ''}`}

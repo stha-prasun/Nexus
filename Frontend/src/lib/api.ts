@@ -1,6 +1,6 @@
 import { trackRequest } from '@/lib/progress';
 
-const BASE_URL: string =
+export const API_BASE: string =
   import.meta.env.VITE_API_URL ?? 'http://localhost:3000/api/v1';
 
 export type Role = 'PM' | 'Dev' | 'Admin' | 'HR';
@@ -36,11 +36,12 @@ export class ApiError extends Error {
   }
 }
 
-const parseError = async (response: Response): Promise<ApiError> => {
+/** Shared by fetch and the XHR upload path (both only have the raw body). */
+const parseErrorBody = (status: number, text: string): ApiError => {
   let messages: string[] = ['Something went wrong. Please try again.'];
   let code: string | undefined;
   try {
-    const body = (await response.json()) as {
+    const body = JSON.parse(text) as {
       message?: string | string[];
       status?: unknown;
     };
@@ -55,8 +56,11 @@ const parseError = async (response: Response): Promise<ApiError> => {
   } catch {
     // Non-JSON error body — keep the generic fallback.
   }
-  return new ApiError(response.status, messages, code);
+  return new ApiError(status, messages, code);
 };
+
+const parseError = async (response: Response): Promise<ApiError> =>
+  parseErrorBody(response.status, await response.text());
 
 async function apiRequest<T>(
   path: string,
@@ -66,7 +70,7 @@ async function apiRequest<T>(
   let response: Response;
   try {
     response = await trackRequest(
-      fetch(`${BASE_URL}${path}`, {
+      fetch(`${API_BASE}${path}`, {
         method,
         credentials: 'include',
         ...(body === undefined
@@ -188,7 +192,7 @@ export async function me(): Promise<MeResult> {
   let response: Response;
   try {
     response = await trackRequest(
-      fetch(`${BASE_URL}/auth/me`, {
+      fetch(`${API_BASE}/auth/me`, {
         credentials: 'include',
         signal: controller.signal,
       }),
@@ -245,7 +249,7 @@ export async function verifyEmail(token: string): Promise<VerifyEmailResponse> {
   try {
     response = await trackRequest(
       fetch(
-        `${BASE_URL}/auth/verify-email?token=${encodeURIComponent(token)}`,
+        `${API_BASE}/auth/verify-email?token=${encodeURIComponent(token)}`,
         { credentials: 'include' },
       ),
     );
@@ -648,6 +652,110 @@ export function deleteTask(id: string): Promise<void> {
   return apiRequest<void>(`/tasks/${encodeURIComponent(id)}`, 'DELETE');
 }
 
+// -------------------------------------------------------------- documents
+
+/** One row of GET /projects/:id/documents — mirrors DocumentResponseDto. */
+export interface ProjectDocument {
+  id: string;
+  name: string;
+  /** Size in bytes. */
+  size: number;
+  /** Lowercase extension without the dot (e.g. `pdf`). */
+  extension: string;
+  uploadedBy: { id: string; name: string };
+  /** ISO timestamp of the upload. */
+  createdAt: string;
+}
+
+/** Newest first; non-members get 404 document_project_not_found. */
+export function listProjectDocuments(
+  projectId: string,
+): Promise<{ documents: ProjectDocument[] }> {
+  return apiRequest<{ documents: ProjectDocument[] }>(
+    `/projects/${encodeURIComponent(projectId)}/documents`,
+    'GET',
+  );
+}
+
+/**
+ * Multipart upload over XHR — fetch can't report upload progress and the
+ * page renders live progress bars. Field name `file` matches multer's
+ * `single('file')`; server validation errors (400/413/415) come back as
+ * the usual `{ status, message }` body via parseErrorBody.
+ */
+export function uploadProjectDocument(
+  projectId: string,
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<{ document: ProjectDocument }> {
+  return trackRequest(
+    new Promise<{ document: ProjectDocument }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open(
+        'POST',
+        `${API_BASE}/projects/${encodeURIComponent(projectId)}/documents`,
+      );
+      xhr.withCredentials = true;
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      });
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(
+              JSON.parse(xhr.responseText) as {
+                document: ProjectDocument;
+              },
+            );
+          } catch {
+            reject(
+              new ApiError(xhr.status, [
+                'Something went wrong. Please try again.',
+              ]),
+            );
+          }
+          return;
+        }
+        reject(parseErrorBody(xhr.status, xhr.responseText));
+      });
+      xhr.addEventListener('error', () => {
+        reject(
+          new ApiError(0, [
+            "Can't reach the server. Please try again shortly.",
+          ]),
+        );
+      });
+      const form = new FormData();
+      form.append('file', file);
+      xhr.send(form);
+    }),
+  );
+}
+
+/** Presigned absolute URL (remote) or relative content path (local). */
+export function getDocumentDownloadUrl(
+  projectId: string,
+  documentId: string,
+): Promise<{ url: string; expiresInSeconds: number }> {
+  return apiRequest<{ url: string; expiresInSeconds: number }>(
+    `/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}/download`,
+    'GET',
+  );
+}
+
+/** 200 `{ message, deleted }` — only Admin/PM/lead members may call it. */
+export function deleteProjectDocument(
+  projectId: string,
+  documentId: string,
+): Promise<{ message: string; deleted: number }> {
+  return apiRequest<{ message: string; deleted: number }>(
+    `/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+    'DELETE',
+  );
+}
+
 // ------------------------------------------------------------- notifications
 
 /** Exactly two ship today; stored as varchar so more types never need a migration. */
@@ -712,5 +820,5 @@ export function markAllNotificationsRead(): Promise<void> {
 
 /** Absolute URL of the SSE stream — the transport lives in `notificationsStream.ts`. */
 export function notificationsStreamUrl(): string {
-  return `${BASE_URL}/notifications/stream`;
+  return `${API_BASE}/notifications/stream`;
 }
